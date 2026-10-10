@@ -379,7 +379,8 @@ export class Game {
   applyBump(slot: number, ix: number, iz: number) {
     const p = this.players.find((q) => q.slot === slot);
     if (!p || p.remote) return;
-    const k = p.cart.stats.addon === 'ram' ? 0.35 : 1; // the ram soaks it up
+    // the ram soaks it up; and nothing (mega cart + ram at full nitro) launches you faster than 7 m/s
+    const m = p.cart.body.mass(), j = Math.hypot(ix, iz) * (p.cart.stats.addon === 'ram' ? 0.35 : 1), k = Math.min(j, m * 7) / (Math.hypot(ix, iz) || 1);
     p.cart.body.applyImpulse({ x: ix * k, y: 0, z: iz * k }, true);
     if (p === this.local) { this.shake = Math.max(this.shake, 0.5); this.sfx.crash(12000); }
   }

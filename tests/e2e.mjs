@@ -645,6 +645,8 @@ async function mpTest(query, maxErr) {
   await client.page.waitForFunction(() => CART.game && CART.game.phase === 'race', { timeout: 60000, polling: 100 });
   const same = await Promise.all([H(() => CART.game.world.items.all.filter((i) => !i.spawned).length), C(() => CART.game.world.items.all.filter((i) => !i.spawned).length), H(() => JSON.stringify(CART.game.cfg.list)), C(() => JSON.stringify(CART.game.cfg.list))]);
   assert(same[0] === same[1] && same[2] === same[3], 'peers built different stores/lists: ' + JSON.stringify(same));
+  // bots now carry oil droppers and battering rams: park them so they can't skew the netcode measurement
+  await H(() => CART.dev('freeze'));
   // client drives; host watches the remote cart
   await C(() => CART.setInput({ throttle: 1, sprint: true }));
   const samples = [];
@@ -664,7 +666,8 @@ async function mpTest(query, maxErr) {
   await C(() => CART.setInput({ throttle: -1 }));
   await new Promise((r) => setTimeout(r, 1500));
   await C(() => CART.setInput(null));
-  await new Promise((r) => setTimeout(r, 1200));
+  await client.page.waitForFunction(() => CART.state().speed < 0.05, { timeout: 5000, polling: 100 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1000));
   const [hs, cs] = await Promise.all([H(() => CART.remote(1)), C(() => CART.state())]);
   const err = Math.hypot(hs.x - cs.x, hs.z - cs.z);
   assert(err < 0.35, `stopped client: host still sees it ${err.toFixed(2)}m off (speed ${cs.speed.toFixed(2)})`);
