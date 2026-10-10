@@ -5,6 +5,7 @@ const { page, errors } = await openPage(browser, `http://127.0.0.1:${srv.address
 const store = process.argv[2] || 'safely';
 await page.evaluate((s) => CART.startSolo(s, { seed: 7, skipCountdown: true }), store);
 await page.evaluate(() => { CART.manual = true; });
+console.log('bots:', await page.evaluate(() => CART.game.players.filter((p) => p.bot).map((p) => `${p.info.custom.body}/${p.info.custom.wheel}/${p.info.custom.addon}`).join(' ')));
 for (let t = 0; t < 180; t += 15) {
   const t0 = Date.now();
   await page.evaluate(() => CART.advance(15));

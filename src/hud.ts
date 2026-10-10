@@ -55,8 +55,13 @@ export class Hud {
     tm.textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
     tm.classList.toggle('low', left < 30);
     const c = g.local.cart;
-    $('h-speed').innerHTML = `<b>${Math.round(c.speed() * 3.6)}</b> km/h${c.boost > 0 ? ' 🔥' : ''}${c.riding ? ' · RIDING' : ''}`;
+    $('h-speed').innerHTML = `<b>${Math.round(c.speed() * 3.6)}</b> km/h${c.boost > 0 || c.nitroOn ? ' 🔥' : ''}${c.riding ? ' · RIDING' : ''}`;
     ($('h-stamina') as HTMLElement).style.width = `${c.stamina * 100}%`;
+    const nb = $('h-nitro') as HTMLElement;
+    nb.style.width = `${(c.nitro / c.stats.nitroCap) * 100}%`;
+    nb.classList.toggle('on', c.nitroOn);
+    const ad = c.stats.addon;
+    $('h-addon').textContent = `E nitro ${c.nitro.toFixed(1)}s` + (ad === 'dropper' ? ` · Q oil ×${c.charges}` : ad === 'vacuum' ? ' · 🧹 Mop-Vac on' : ad === 'magnet' ? ' · 🧲 magnet' : ad === 'ram' ? ' · 🐏 ram' : ad === 'tank' ? ' · big tank' : '');
     const st = c.surface.type;
     $('h-surface').textContent = st ? ({ egg: '🥚 EGG YOLK — slippery!', milk: '🥛 MILK — slippery!', oil: '🛢 OIL — no grip!', soda: '🥤 STICKY SODA — slow!', mayo: '🫙 MAYO — slick!' } as Record<string, string>)[st] ?? '' : '';
 

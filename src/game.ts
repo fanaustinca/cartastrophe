@@ -3,12 +3,13 @@
 import * as THREE from 'three';
 import { Physics, RAPIER, G, groups } from './physics';
 import { StoreWorld } from './store';
-import { Cart, CartModel, CART } from './cart';
+import { Cart, CartModel, CART, CartInput, NO_INPUT } from './cart';
 import { Bot } from './bots';
 import { Interpolator, Snap, Clock } from './net';
 import { Customization, KIND_BY_ID, STORE_BY_ID, LIST_SIZE, MESS, INTERP_DELAY } from './config';
 import { Rng } from './rng';
 import { Guides } from './guides';
+import { Restock } from './restock';
 import type { Item } from './items';
 import type { Sfx } from './audio';
 
@@ -72,9 +73,9 @@ export class Game {
   frameTime = 0;
   camMode: 'fp' | 'chase' = 'fp';
   results: ResultRow[] | null = null;
-  input = { throttle: 0, steer: 0, sprint: false, ride: false };
+  input: CartInput = { ...NO_INPUT };
   camOverride: number[] | null = null; // [px,py,pz, tx,ty,tz] (tests / photo mode)
-  inputOverride: { throttle: number; steer: number; sprint: boolean; ride: boolean } | null = null;
+  inputOverride: CartInput | null = null;
   shake = 0;
   messages: { text: string; t: number; color: string }[] = [];
   stats = { fps: 60, frameMs: 0, physMs: 0, steps: 0 };
@@ -94,6 +95,7 @@ export class Game {
   private envMap: THREE.Texture | null;
   readonly authority: boolean;
   guides: Guides;
+  restock: Restock;
   botsFrozen = false;
   readonly isSolo: boolean;
 
@@ -131,6 +133,7 @@ export class Game {
       cfg.list = makeList(cfg.seed, stock);
     }
     this.world.items.onBreak = (it, f) => this.smash(it, f, true);
+    this.restock = new Restock(this.world);
 
     for (const info of cfg.players) this.addPlayer(info);
     this.local = this.players.find((p) => p.slot === localSlot)!;
@@ -160,7 +163,9 @@ export class Game {
       }, info.slot * 977 + this.cfg.seed);
     }
     cart.onImpact = (force, other) => this.onCartImpact(p, force, other);
+    cart.onDrop = (x, z) => this.dropOil(x, z, p, true);
     if (isLocal) {
+      cart.onNitro = () => this.sfx.boost();
       cart.onBoost = (k) => { this.sfx.boost(); this.flash(k === 'nitro' ? 'CHECKOUT NITRO!' : 'PROMO BOOST!', '#ffd23a'); };
       cart.onSpin = (t) => { this.sfx.spin(); this.flash(t === 'oil' ? 'OIL SLICK! SPINNING OUT' : `SLIPPED ON ${t.toUpperCase()}!`, '#ff7a3a'); this.shake = Math.max(this.shake, 0.3); };
     }
@@ -207,9 +212,9 @@ export class Game {
     const L = this.local.cart;
     const src = this.inputOverride ?? this.input;
     if (racing && !this.local.done) Object.assign(L.input, src);
-    else { L.input.throttle = 0; L.input.steer = 0; L.input.sprint = false; L.input.ride = false; if (this.local.done) L.input.throttle = L.fwdSpeed > 0.3 ? -0.5 : 0; }
+    else { Object.assign(L.input, NO_INPUT); if (this.local.done) L.input.throttle = L.fwdSpeed > 0.3 ? -0.5 : 0; }
     // bots
-    for (const p of this.players) if (p.bot) { if (racing && !this.botsFrozen) p.bot.update(dt); else { p.cart.input.throttle = 0; p.cart.input.steer = 0; } }
+    for (const p of this.players) if (p.bot) { if (racing && !this.botsFrozen) p.bot.update(dt); else Object.assign(p.cart.input, NO_INPUT); }
     // drive dynamic carts, pose kinematic (remote) carts from the interpolator
     const renderT = this.net ? this.net.clock.hostNow() - INTERP_DELAY : 0;
     for (const p of this.players) {
@@ -220,7 +225,13 @@ export class Game {
     this.phys.step();
     this.world.items.syncActive();
     this.world.items.watchdog(dt);
+    this.restock.afterStep();
     this.simTime += dt;
+    for (const p of this.players) if (!p.remote && p.cart.stats.addon === 'vacuum') this.vacuum(p, dt);
+    if (this.authority) {
+      const carts = this.players.map((q) => q.cart.body.translation());
+      for (const g of this.restock.scan(dt, this.simTime, carts)) this.doRestock(g.index, true);
+    }
     this.bumpT -= dt;
 
     // collection + finish for carts we own
@@ -242,7 +253,8 @@ export class Game {
     if (!needs.size) return;
     const t = p.cart.body.translation();
     const f = p.cart.forward(_v);
-    const near = this.world.items.near(t.x + f.x * 0.15, t.z + f.z * 0.15, 1.4, this.tmpItems, (it) => it.alive && needs.has(it.kind.id) && it.body.translation().y < 2.45);
+    const S = p.cart.stats;
+    const near = this.world.items.near(t.x + f.x * 0.15, t.z + f.z * 0.15, S.grab, this.tmpItems, (it) => it.alive && needs.has(it.kind.id) && it.body.translation().y < S.reach);
     if (!near.length) return;
     this.collect(p, near[0], true);
   }
@@ -269,7 +281,7 @@ export class Game {
     const t = it.body.translation();
     const fr = it.kind.fragile;
     this.world.items.remove(it);
-    this.world.hazards.addSlick(fr.mess, t.x, t.z, fr.radius * (0.85 + Math.random() * 0.3));
+    this.world.hazards.addSlick(fr.mess, t.x, t.z, fr.radius * (0.85 + Math.random() * 0.3), 0.6, it.group);
     const col = MESS[fr.mess].color;
     this.world.hazards.burst(t.x, Math.max(0.05, t.y), t.z, col, 14, 2.4, 0.03);
     this.world.hazards.burst(t.x, Math.max(0.05, t.y), t.z, fr.mess === 'egg' ? 0xf6f0e6 : it.color.getHex(), 10, 3, 0.025);
@@ -295,7 +307,8 @@ export class Game {
         // direction of travel before the impact (afterwards the cart has bounced)
         const pv = Math.hypot(p.cart.preVx, p.cart.preVz) || 1;
         const v = { x: p.cart.preVx / pv, z: p.cart.preVz / pv };
-        const k = (sp > SHELF_TIP_SPEED ? Math.min(1.6, 1 + (sp - SHELF_TIP_SPEED) / 4) : 0) * sh.body.mass() * Game.SHOVE;
+        const tip = SHELF_TIP_SPEED * p.cart.stats.topple;
+        const k = (sp > tip ? Math.min(1.6, 1 + (sp - tip) / 4) : 0) * sh.body.mass() * Game.SHOVE;
         const st = sh.body.translation();
         const H = this.world.def.shelfHeight;
         sh.body.applyImpulseAtPoint({ x: v.x * k, y: 0, z: v.z * k }, { x: st.x, y: st.y + H * 0.85, z: st.z }, true);
@@ -308,7 +321,7 @@ export class Game {
       this.bumpT = 0.4;
       const a = p.cart.body.translation(), b = rp.cart.body.translation();
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1;
-      const j = CART.mass * sp * 0.6;
+      const j = CART.mass * sp * 0.6 * p.cart.stats.mass * (p.cart.stats.addon === 'ram' ? 2.2 : 1);
       this.net.event({ e: 'bump', to: rp.slot, ix: (dx / d) * j, iz: (dz / d) * j });
     }
     // huge hits can knock an item out of your basket
@@ -327,10 +340,47 @@ export class Game {
     if (p === this.local) this.flash(`${KIND_BY_ID[kind].label.toUpperCase()} FLEW OUT!`, '#ff5a5a');
   }
 
+  /** Oil Dropper: a fresh slick behind the cart. */
+  dropOil(x: number, z: number, by: Participant | null, announce: boolean) {
+    this.world.hazards.addSlick('oil', x, z, 1.15, 0.5);
+    this.world.hazards.burst(x, 0.3, z, MESS.oil.color, 10, 1.6, 0.03);
+    if (by === this.local) { this.flash('OIL DROPPED! 😈', '#ffb03a'); this.sfx.splat('oil'); }
+    if (announce && this.net) this.net.event({ e: 'drop', x, z });
+  }
+
+  private vacT = new Map<Participant, { d: number; t: number }>();
+  /** Mop-Vac: shrink the puddles under the nozzle; tell the other peers in batches. */
+  private vacuum(p: Participant, dt: number) {
+    const c = p.cart, n = c.nose(), r = 0.32 * c.stats.body.sx + 0.15, d = 1.5 * dt;
+    if (c.speed() < 0.3 && !c.input.throttle) return;
+    const hit = this.world.hazards.vacuum(n.x, n.z, r, d);
+    let v = this.vacT.get(p); if (!v) this.vacT.set(p, (v = { d: 0, t: 0 }));
+    if (hit) {
+      v.d += d;
+      if (Math.random() < 0.3) this.world.hazards.burst(n.x, 0.05, n.z, 0xd8d8d0, 2, 0.8, 0.015);
+    }
+    v.t += dt;
+    if (v.t > 0.15) {
+      if (v.d > 0 && this.net) this.net.event({ e: 'vac', x: n.x, z: n.z, r, d: v.d });
+      v.t = 0; v.d = 0;
+    }
+  }
+
+  /** Restock a wrecked shelf / display (host & solo decide; clients replay). */
+  doRestock(index: number, announce: boolean) {
+    const g = this.restock.groups[index];
+    if (!g) return;
+    this.restock.restock(g);
+    if (announce && this.net) this.net.event({ e: 'restock', g: index });
+    const t = this.local.cart.body.translation();
+    if (Math.hypot(t.x - g.x, t.z - g.z) < 20) this.flash(g.shelf ? '♻ SHELF RESTOCKED' : '♻ DISPLAY RESTOCKED', '#7affb0');
+  }
+
   applyBump(slot: number, ix: number, iz: number) {
     const p = this.players.find((q) => q.slot === slot);
     if (!p || p.remote) return;
-    p.cart.body.applyImpulse({ x: ix, y: 0, z: iz }, true);
+    const k = p.cart.stats.addon === 'ram' ? 0.35 : 1; // the ram soaks it up
+    p.cart.body.applyImpulse({ x: ix * k, y: 0, z: iz * k }, true);
     if (p === this.local) { this.shake = Math.max(this.shake, 0.5); this.sfx.crash(12000); }
   }
 
@@ -419,7 +469,7 @@ export class Game {
     const riding = c.riding;
     const bob = this.camMode === 'fp' && !riding ? Math.sin(this.frameTime * (7 + sp)) * Math.min(0.05, sp * 0.006) : 0;
     if (this.camMode === 'fp') {
-      const back = riding ? 0.62 : 0.98, h = riding ? 1.95 : 1.62;
+      const eye = c.model.eye, back = riding ? eye.rideBack : eye.back, h = riding ? eye.rideHeight : eye.height;
       this.camera.position.set(root.position.x - Math.sin(yaw) * back, root.position.y + h + bob, root.position.z - Math.cos(yaw) * back);
       this.camera.lookAt(this.camera.position.x + fx * 6, root.position.y + 0.75, this.camera.position.z + fz * 6);
     } else {

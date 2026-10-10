@@ -67,12 +67,12 @@ export class Guides {
   /** Recompute clusters (cheap: a few thousand items, a few times a second). */
   refresh() {
     const g = this.game, me = g.local, t = me.cart.body.translation();
-    const needs = g.needs(me);
+    const needs = g.needs(me), reach = me.cart.stats.reach;
     const buckets = new Map<string, Cluster>();
     for (const it of g.world.items.all) {
       if (!it.alive || !needs.has(it.kind.id)) continue;
       const p = it.body.translation();
-      if (p.y > 2.45) continue; // out of reach
+      if (p.y > reach) continue; // out of reach
       // bucket by named area (so a marker hangs over the aisle, not over the shelf between two
       // aisles) and by distance along it
       const where = g.world.whereIs(p.x, p.z);

@@ -57,6 +57,19 @@ h2 { margin: 0; font-size: 1.8rem; display: flex; align-items: center; gap: 12px
 .card .sw { height: 26px; border-radius: 6px; border: 1px solid var(--line); }
 .card .desc { color: var(--muted); font-size: 0.82rem; min-height: 1.2em; }
 .card.eq { border-color: var(--yellow); }
+.card .desc.stat { color: #cfd4e2; font-size: 0.74rem; }
+.card .pips { display: flex; gap: 4px; }
+.card .pips i { flex: 1; height: 10px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); }
+.card .pips i.on { background: linear-gradient(90deg, #30e0ff, #2a8af0); box-shadow: 0 0 6px #30e0ff; }
+.shop-h { grid-column: 1 / -1; color: var(--yellow); font-weight: 800; letter-spacing: 1px; margin-top: 8px; }
+#g-stats { font-size: 0.82rem; text-align: center; max-width: 900px; }
+#g-stats b { color: var(--yellow); }
+/* garage: shop panel on the right, the cart on its turntable stays visible on the left */
+#garage { align-items: flex-end; justify-content: flex-start; background: linear-gradient(90deg, rgba(5, 6, 10, 0) 30%, rgba(5, 6, 10, 0.9) 55%); }
+#garage > * { width: min(660px, 100%); }
+#garage h2, #garage .tabs { justify-content: flex-start; }
+#garage .shop { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); align-content: start; }
+@media (max-width: 760px) { #garage { background: rgba(5, 6, 10, 0.85); } }
 
 label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%); color: var(--muted); }
 
@@ -87,6 +100,10 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 #h-speed b { font: 900 2rem 'Arial Black', Impact, sans-serif; }
 .bar { height: 8px; background: rgba(255, 255, 255, 0.12); border-radius: 4px; overflow: hidden; margin-top: 6px; }
 #h-stamina { height: 100%; background: linear-gradient(90deg, #3ad07a, #b0ff5a); width: 100%; }
+.bar.nitro { height: 6px; }
+#h-nitro { height: 100%; background: linear-gradient(90deg, #2a8af0, #30f0ff); width: 100%; transition: width 0.1s; }
+#h-nitro.on { background: linear-gradient(90deg, #ff6a10, #ffe040); box-shadow: 0 0 8px #ff8a20; }
+#h-addon { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
 #h-surface { font-size: 0.8rem; color: #ffb07a; min-height: 1em; margin-top: 4px; }
 #h-map { position: absolute; right: 12px; bottom: 12px; border-radius: 14px; }
 #h-guide { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; background: var(--panel); padding: 4px 14px 4px 8px; border-radius: 22px; font-size: 0.95rem; white-space: nowrap; }

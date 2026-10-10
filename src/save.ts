@@ -1,5 +1,5 @@
 // Player profile persisted in localStorage (wrapped: storage can be blocked).
-import { Customization, DEFAULT_CUSTOM, WHEELS, SKINS, NEONS, SQUEAKS } from './config';
+import { Customization, DEFAULT_CUSTOM, NO_UPGRADES, WHEELS, SKINS, NEONS, SQUEAKS, BODIES, ADDONS, ENGINES, TRIMS } from './config';
 
 export interface Profile {
   name: string;
@@ -13,11 +13,12 @@ export interface Profile {
 }
 
 const KEY = 'cartastrophe.profile.v1';
+const STARTER = ['wheel:caster', 'skin:chrome', 'neon:none', 'squeak:classic', 'body:standard', 'addon:none', 'engine:none', 'trim:red'];
 const fresh = (): Profile => ({
   name: 'Shopper' + Math.floor(100 + Math.random() * 900),
   coupons: 200,
-  owned: ['wheel:caster', 'skin:chrome', 'neon:none', 'squeak:classic'],
-  custom: { ...DEFAULT_CUSTOM },
+  owned: [...STARTER],
+  custom: { ...DEFAULT_CUSTOM, up: { ...NO_UPGRADES } },
   best: {},
   quality: 'medium',
   volume: 0.7,
@@ -28,7 +29,14 @@ export function loadProfile(reset = false): Profile {
   if (reset) { try { localStorage.removeItem(KEY); } catch { /* blocked */ } }
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...fresh(), ...JSON.parse(raw) };
+    if (raw) {
+      // older saves predate bodies / add-ons / engines / upgrades: fill in the new fields
+      const old = JSON.parse(raw) as Partial<Profile>;
+      const p = { ...fresh(), ...old };
+      p.custom = { ...DEFAULT_CUSTOM, ...old.custom, up: { ...NO_UPGRADES, ...old.custom?.up } };
+      p.owned = [...new Set([...STARTER, ...(old.owned ?? [])])];
+      return p;
+    }
   } catch { /* blocked or corrupt */ }
   return fresh();
 }
@@ -37,8 +45,12 @@ export function saveProfile(p: Profile) {
 }
 
 export const CATEGORIES = {
+  body: BODIES,
   wheel: WHEELS,
+  addon: ADDONS,
+  engine: ENGINES,
   skin: SKINS,
+  trim: TRIMS,
   neon: NEONS,
   squeak: SQUEAKS,
 } as const;

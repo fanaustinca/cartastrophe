@@ -68,7 +68,7 @@ export class Bot {
     for (const it of this.ctx.world.items.all) {
       if (!it.alive || !needs.get(it.kind.id)) continue;
       const p = it.body.translation();
-      if (p.y > 2.3) continue;
+      if (p.y > Math.min(9, this.cart.stats.reach) - 0.15) continue;
       let score = Math.hypot(p.x - t.x, p.z - t.z);
       if (it.kind.fragile && p.y < 0.3) score += 3; // fallen fragile stuff is about to smash
       score += p.y > 1.5 ? 1.5 : 0;
@@ -116,6 +116,7 @@ export class Bot {
     const inp = this.cart.input;
     const c = this.cart;
     const t = c.body.translation();
+    inp.nitro = false; inp.action = false;
     if (this.ctx.finished()) { inp.throttle = c.fwdSpeed > 0.5 ? -0.4 : 0; inp.steer = 0; inp.sprint = false; inp.ride = false; return inp; }
 
     this.think -= dt; this.replan -= dt; this.noiseT -= dt; this.ramT -= dt;
@@ -230,6 +231,16 @@ export class Bot {
     // sprint only when it's actually useful: lined up, clear road, a long way to go
     inp.sprint = inp.throttle > 0 && target > 7 && Math.abs(err) < 0.2 && blocked === Infinity && c.stamina > 1.05 - this.skill * 0.9;
     inp.ride = false;
+    // nitro on a long, clear, lined-up straight
+    inp.nitro = inp.sprint && target > 8.6 && Math.abs(err) < 0.12 && c.nitro > 0.6 && this.skill > 0.45;
+    // oil dropper: leave a present for whoever's tailgating
+    if (c.stats.addon === 'dropper' && c.charges >= 1 && Math.random() < 0.02 * this.aggression) {
+      for (const r of this.ctx.rivals()) {
+        if (r === c) continue;
+        const rt = r.body.translation(), dx = rt.x - t.x, dz = rt.z - t.z, d = Math.hypot(dx, dz);
+        if (d > 1.5 && d < 7 && (dx * fwd.x + dz * fwd.z) / d < -0.7) { inp.action = true; break; }
+      }
+    }
     if (Math.abs(err) > 2.4 && finalLeg && Math.hypot(dx, dz) < 3) { inp.throttle = -0.6; inp.steer = -inp.steer; }
     return inp;
   }

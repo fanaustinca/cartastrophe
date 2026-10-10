@@ -5,11 +5,12 @@ import { initPhysics, RAPIER } from './physics';
 import { Game, RaceConfig, ResultRow, SLOT_COLORS } from './game';
 import { Hud } from './hud';
 import { Sfx } from './audio';
-import { Session, randomCustom } from './session';
+import { Session, randomCustom, sanitize } from './session';
 import { lobbyCode, LocalTransport } from './net';
 import { loadProfile, saveProfile, Profile, CATEGORIES, Category } from './save';
-import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName } from './config';
-import { CartModel } from './cart';
+import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName, BODIES, UPGRADES, MAX_LEVEL, upgradePrice, cartStats, TRIMS } from './config';
+import { CartModel, NO_INPUT } from './cart';
+import { Restock } from './restock';
 import { ShelfSystem } from './shelves';
 import { logoTexture } from './textures';
 import { thumbCanvas, thumbUrl } from './thumbs';
@@ -49,6 +50,7 @@ function resize() {
   const a = window.innerWidth / Math.max(1, window.innerHeight);
   if (game) { game.camera.aspect = a; game.camera.updateProjectionMatrix(); }
   garageCam.aspect = a; garageCam.updateProjectionMatrix();
+  garageView($('garage').classList.contains('show'));
 }
 
 // ---------------- garage / menu backdrop ----------------
@@ -68,7 +70,18 @@ garageScene.add(garageCart.root);
 garageCam.position.set(2.6, 1.7, 3.2); garageCam.lookAt(0, 0.7, 0);
 let backdropStore = 0, backdropT = 0;
 
-function refreshGarageCart() { garageCart.applyCustom(profile.custom); }
+function refreshGarageCart() {
+  garageCart.applyCustom(profile.custom);
+  // frame whatever's on the turntable (a 100-storey cart needs a step back)
+  const b = BODIES.find((x) => x.id === profile.custom.body) ?? BODIES[0];
+  if (b.levels > 4) { garageCam.position.set(6.5, 3.2, 8.2); garageCam.lookAt(0, 3.4, 0); }
+  else {
+    const k = Math.max(b.sx, b.sz * 0.8, b.sy, 1 + (b.levels - 1) * 0.45);
+    garageCam.position.set(2.6 * (0.55 + 0.45 * k), 1.7 * (0.6 + 0.4 * k), 3.2 * (0.55 + 0.45 * k));
+    garageCam.lookAt(0, 0.7 * (0.5 + 0.5 * Math.max(b.sy, 1 + (b.levels - 1) * 0.8)), 0);
+  }
+}
+refreshGarageCart();
 
 // ---------------- state ----------------
 let game: Game | null = null;
@@ -79,6 +92,13 @@ let lastSolo: string | null = null;
 
 function show(id: string | null) {
   for (const s of document.querySelectorAll('.screen')) s.classList.toggle('show', s.id === id);
+  garageView(id === 'garage');
+}
+/** In the garage the shop sits on the right, so slide the turntable into the left part of the frame. */
+function garageView(on: boolean) {
+  const w = window.innerWidth, h = Math.max(1, window.innerHeight);
+  if (on && w > 760) garageCam.setViewOffset(w, h, w * 0.22, 0, w, h); else garageCam.clearViewOffset();
+  garageCam.updateProjectionMatrix();
 }
 function err(msg: string) { $('title-err').textContent = msg; }
 
@@ -123,7 +143,7 @@ $('btn-join').onclick = async () => {
     lobbyScreen();
   } catch (e) { err('Could not join: ' + (e as Error).message); }
 };
-$('btn-garage').onclick = () => garageScreen('wheel');
+$('btn-garage').onclick = () => garageScreen('body');
 $('btn-settings').onclick = settingsScreen;
 
 function lobbyScreen() {
@@ -158,25 +178,57 @@ function wireSession(s: Session) {
 }
 
 // ---------------- garage / shop ----------------
-const LABELS: Record<Category, string> = { wheel: '🛞 Wheels', skin: '🎨 Skins', neon: '💡 Neon', squeak: '🔊 Squeaks' };
+const LABELS: Record<Category, string> = { body: '🛒 Carts', wheel: '🛞 Wheels', addon: '🧲 Add-ons', engine: '⚡ Engine & Nitro', skin: '🎨 Paint', trim: '🎀 Trim', neon: '💡 Neon', squeak: '🔊 Squeaks' };
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+const RAINBOW = 'linear-gradient(90deg,red,orange,yellow,lime,cyan,blue,magenta)';
+function swatch(cat: Category, id: string): string {
+  if (cat === 'skin') {
+    const k = SKINS.find((x) => x.id === id)!;
+    const bg = k.anim === 'rainbow' ? RAINBOW : k.anim === 'police' ? 'linear-gradient(90deg,#ff1a1a 50%,#1a3aff 50%)' : k.anim === 'lava' ? 'linear-gradient(90deg,#ff2a00,#ffa020,#ff2a00)' : k.anim === 'galaxy' ? 'linear-gradient(90deg,#2a1060,#6040e0,#c040c0)' : hex(k.color);
+    return `<div class="sw" style="background:${bg};opacity:${k.opacity ?? 1}${k.emissive ? `;box-shadow:0 0 12px ${hex(k.color)}` : ''}"></div>`;
+  }
+  if (cat === 'neon') {
+    const n = NEONS.find((x) => x.id === id)!;
+    if (n.color === null) return '<div class="sw" style="background:#222"></div>';
+    return `<div class="sw" style="background:${n.rainbow ? RAINBOW : n.police ? 'linear-gradient(90deg,#ff1010 50%,#1040ff 50%)' : hex(n.color)};box-shadow:0 0 14px ${hex(n.color)}"></div>`;
+  }
+  if (cat === 'trim') return `<div class="sw" style="background:${hex(TRIMS.find((x) => x.id === id)!.color)}"></div>`;
+  if (cat === 'wheel') return `<div class="sw" style="background:${hex(WHEELS.find((x) => x.id === id)!.color)}"></div>`;
+  return '';
+}
+function cardStats(cat: Category, id: string): string {
+  if (cat === 'wheel') { const w = WHEELS.find((x) => x.id === id)!; return `speed ${pct(w.speed)} · grip ${pct(w.grip)} · slip-proof ${pct(w.slickResist)}`; }
+  if (cat === 'body') {
+    const b = BODIES.find((x) => x.id === id)!;
+    const reach = b.reach > 20 ? 'every shelf' : `${b.reach.toFixed(1)} m`;
+    return `speed ${pct(b.speed)} · accel ${pct(b.accel)} · steering ${pct(b.steer)} · weight ${pct(b.mass)} · reach ${reach}${b.levels > 1 ? ` · ${b.levels} levels` : ''}`;
+  }
+  return '';
+}
+function garageStats() {
+  const S = cartStats(profile.custom);
+  $('g-stats').innerHTML = `<b>Your cart</b> · top speed ${pct(S.speed)} · accel ${pct(S.accel)} · steering ${pct(S.steer)} · weight ${pct(S.mass)} · nitro ${S.nitroCap.toFixed(1)} s @ ${pct(S.nitroPower)}${S.motor ? ' · ⚡ motor' : ''}`;
+}
 function garageScreen(cat: Category) {
   show('garage');
   $('g-coupons').textContent = String(profile.coupons);
+  garageStats();
   const tabs = $('g-tabs'); tabs.innerHTML = '';
   for (const c of Object.keys(CATEGORIES) as Category[]) {
     const b = document.createElement('button'); b.textContent = LABELS[c]; b.className = c === cat ? 'on' : '';
+    b.dataset.cat = c;
     b.onclick = () => garageScreen(c); tabs.appendChild(b);
   }
   const grid = $('g-items'); grid.innerHTML = '';
-  for (const it of CATEGORIES[cat] as readonly { id: string; name: string; price: number; desc?: string; color?: number | null }[]) {
+  for (const it of CATEGORIES[cat] as readonly { id: string; name: string; price: number; desc?: string }[]) {
     const key = `${cat}:${it.id}`;
     const owned = profile.owned.includes(key);
-    const equipped = profile.custom[cat as keyof Customization] === it.id;
+    const equipped = (profile.custom as unknown as Record<string, string>)[cat] === it.id;
     const card = document.createElement('div');
     card.className = 'card' + (equipped ? ' eq' : '');
-    const sw = it.color != null ? `<div class="sw" style="background:${it.id === 'rainbow' || it.id === 'rgb' ? 'linear-gradient(90deg,red,orange,yellow,lime,cyan,blue,magenta)' : hex(it.color)}"></div>` : '';
-    const stats = cat === 'wheel' ? (() => { const w = WHEELS.find((x) => x.id === it.id)!; return `speed ${Math.round(w.speed * 100)}% · grip ${Math.round(w.grip * 100)}% · slick-proof ${Math.round(w.slickResist * 100)}%`; })() : '';
-    card.innerHTML = `<b>${it.name}</b>${sw}<div class="desc">${it.desc ?? stats}</div><div class="desc">${cat === 'wheel' ? stats : ''}</div>`;
+    card.dataset.id = key;
+    const st = cardStats(cat, it.id);
+    card.innerHTML = `<b>${it.name}</b>${swatch(cat, it.id)}<div class="desc">${it.desc ?? ''}</div>${st ? `<div class="desc stat">${st}</div>` : ''}`;
     const b = document.createElement('button');
     b.textContent = equipped ? 'Equipped' : owned ? 'Equip' : `Buy 🎟 ${it.price}`;
     b.disabled = equipped || (!owned && profile.coupons < it.price);
@@ -189,6 +241,25 @@ function garageScreen(cat: Category) {
     if (cat === 'squeak') { const p = document.createElement('button'); p.textContent = '▶ Preview'; p.className = 'small'; p.onclick = () => { sfx.unlock(); sfx.squeak(it.id, 1.5); }; card.appendChild(p); }
     card.appendChild(b);
     grid.appendChild(card);
+  }
+  if (cat === 'engine') {
+    const h = document.createElement('div'); h.className = 'shop-h'; h.textContent = 'Upgrades (kept forever, stack up to level 5)';
+    grid.appendChild(h);
+    const hasMotor = profile.owned.includes('engine:electric');
+    for (const u of UPGRADES) {
+      const lvl = profile.custom.up[u.id] ?? 0, price = upgradePrice(u, lvl);
+      const card = document.createElement('div');
+      card.className = 'card up';
+      card.dataset.id = 'up:' + u.id;
+      card.innerHTML = `<b>${u.name}</b><div class="pips">${Array.from({ length: MAX_LEVEL }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('')}</div><div class="desc">${u.desc}</div>`;
+      const b = document.createElement('button');
+      const locked = u.motor && !hasMotor;
+      b.textContent = lvl >= MAX_LEVEL ? 'MAXED' : locked ? '🔒 Needs the Electric Motor' : `Upgrade to ${lvl + 1} · 🎟 ${price}`;
+      b.disabled = lvl >= MAX_LEVEL || !!locked || profile.coupons < price;
+      b.onclick = () => { profile.coupons -= price; profile.custom.up[u.id] = lvl + 1; sfx.pickup(); saveProfile(profile); refreshGarageCart(); garageScreen(cat); };
+      card.appendChild(b);
+      grid.appendChild(card);
+    }
   }
 }
 $('btn-garage-back').onclick = titleScreen;
@@ -214,7 +285,7 @@ $('btn-settings-back').onclick = () => {
 function soloConfig(storeId: string, seed?: number, bots = 7): RaceConfig {
   const s = seed ?? ((Math.random() * 2 ** 31) | 0);
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
-  const players = [{ slot: 0, id: 'me', name: profile.name, color: SLOT_COLORS[0], custom: profile.custom, bot: false }];
+  const players = [{ slot: 0, id: 'me', name: profile.name, color: SLOT_COLORS[0], custom: sanitize(profile.custom), bot: false }];
   for (let i = 1; i <= bots; i++) players.push({ slot: i, id: 'bot' + i, name: names[i - 1], color: SLOT_COLORS[i], custom: randomCustom(), bot: true });
   return { storeId, seed: s, time: RACE_TIME, list: [], players };
 }
@@ -278,12 +349,16 @@ $('btn-quit').onclick = () => { paused = false; endGame(); session?.close(); ses
 
 // ---------------- dev console (` key) ----------------
 const DEV_HELP = `coupons [n]      add coupons (default 10000)
-unlock           own every wheel / skin / neon / squeak
+unlock           own everything in the garage
 reset            wipe your profile back to a fresh start
 win              tick off your whole shopping list (then drive to a checkout)
 finish           check out right now
 time <sec>       set the race clock's time left
 tp <item|checkout>  teleport next to the nearest <item> on your list, or a checkout
+nitro            refill your nitro tank
+max              every upgrade to level 5 (and the motor)
+cart <type>      swap carts mid-race: ${BODIES.map((b) => b.id).join(' ')}
+restock          restock every wrecked shelf right now
 freeze           pause / unpause the bots
 topple           knock every shelf over (chaos)
 help             this list`;
@@ -292,7 +367,7 @@ function devRun(line: string): string {
   const [cmd, ...args] = line.trim().split(/\s+/);
   const g = game;
   const needGame = () => { if (!g) throw new Error('start a race first'); return g; };
-  const refresh = () => { saveProfile(profile); $('coupons').textContent = String(profile.coupons); if ($('garage').classList.contains('show')) garageScreen('wheel'); };
+  const refresh = () => { saveProfile(profile); refreshGarageCart(); $('coupons').textContent = String(profile.coupons); if ($('garage').classList.contains('show')) garageScreen((document.querySelector('#g-tabs .on') as HTMLElement | null)?.dataset.cat as Category ?? 'body'); };
   switch ((cmd ?? '').toLowerCase()) {
     case '': return '';
     case 'help': case '?': return DEV_HELP;
@@ -324,6 +399,28 @@ function devRun(line: string): string {
       const [i, j] = gg.world.nav.nearestFree(c.x, c.z);
       gg.local.cart.reset(gg.world.nav.wx(i), gg.world.nav.wz(j), gg.local.cart.yaw);
       return `teleported to ${kindName(c.kind)} (${c.where})`;
+    }
+    case 'nitro': { const c = needGame().local.cart; c.nitro = c.stats.nitroCap; c.charges = 4; return `nitro full (${c.nitro.toFixed(1)} s)`; }
+    case 'max': {
+      for (const u of UPGRADES) profile.custom.up[u.id] = MAX_LEVEL;
+      if (!profile.owned.includes('engine:electric')) profile.owned.push('engine:electric');
+      profile.custom.engine = 'electric';
+      refresh(); if (g) g.local.cart.setCustom(sanitize(profile.custom));
+      return 'electric motor + every upgrade at level 5';
+    }
+    case 'cart': case 'body': {
+      const b = BODIES.find((x) => x.id === (args[0] ?? '').toLowerCase() || x.name.toLowerCase().includes((args.join(' ') || '?').toLowerCase()));
+      if (!b) throw new Error('usage: cart ' + BODIES.map((x) => x.id).join('|'));
+      profile.custom.body = b.id;
+      if (!profile.owned.includes('body:' + b.id)) profile.owned.push('body:' + b.id);
+      refresh();
+      if (g) { g.local.info.custom = sanitize(profile.custom); g.local.cart.setCustom(g.local.info.custom); g.local.cart.model.setCargo(g.local.cargo); }
+      return `now driving: ${b.name}`;
+    }
+    case 'restock': {
+      const gg = needGame(); let n = 0;
+      for (const grp of gg.restock.groups) if (grp.since >= 0 || grp.items.some((it) => !it.alive) || grp.shelf?.moved) { gg.doRestock(grp.index, true); n++; }
+      return `restocked ${n} shelves / displays`;
     }
     case 'freeze': { const gg = needGame(); gg.botsFrozen = !gg.botsFrozen; return gg.botsFrozen ? 'bots frozen' : 'bots unfrozen'; }
     case 'topple': {
@@ -377,6 +474,8 @@ function readInput() {
   inp.steer = (k('KeyD', 'ArrowRight') ? 1 : 0) - (k('KeyA', 'ArrowLeft') ? 1 : 0);
   inp.sprint = k('ShiftLeft', 'ShiftRight');
   inp.ride = k('Space');
+  inp.nitro = k('KeyE');
+  inp.action = k('KeyQ');
   const pad = navigator.getGamepads?.()[0];
   if (pad) {
     const ax = pad.axes[0] ?? 0;
@@ -385,6 +484,8 @@ function readInput() {
     if (rt > 0.05 || lt > 0.05) inp.throttle = rt - lt;
     if (pad.buttons[0]?.pressed) inp.ride = true;
     if (pad.buttons[2]?.pressed || pad.buttons[10]?.pressed) inp.sprint = true;
+    if (pad.buttons[1]?.pressed || pad.buttons[5]?.pressed) inp.nitro = true;
+    if (pad.buttons[3]?.pressed || pad.buttons[4]?.pressed) inp.action = true;
   }
 }
 
@@ -461,9 +562,9 @@ const api = {
     game.frame(0);
   },
   render: () => { if (game) { game.frame(0); hud.update(game, 1, fps); renderer.render(game.scene, game.camera); } else renderer.render(garageScene, garageCam); },
-  setInput: (inp: { throttle?: number; steer?: number; sprint?: boolean; ride?: boolean } | null) => {
+  setInput: (inp: { throttle?: number; steer?: number; sprint?: boolean; ride?: boolean; nitro?: boolean; action?: boolean } | null) => {
     if (!game) return;
-    game.inputOverride = inp ? { throttle: 0, steer: 0, sprint: false, ride: false, ...inp } : null;
+    game.inputOverride = inp ? { ...NO_INPUT, ...inp } : null;
   },
   teleport: (x: number, z: number, yaw: number) => game?.local.cart.reset(x, z, yaw),
   state: () => {
@@ -519,8 +620,11 @@ const api = {
   },
   setName: (n: string) => { profile.name = n; },
   equip: (c: Partial<Customization>) => { Object.assign(profile.custom, c); saveProfile(profile); refreshGarageCart(); },
+  garage: (cat: Category) => garageScreen(cat),
+  garageCart: () => garageCart,
+  tuneRestock: Restock,
   reloadProfile: () => { profile = loadProfile(); return profile; },
-  catalog: { WHEELS, SKINS, NEONS },
+  catalog: { WHEELS, SKINS, NEONS, BODIES, UPGRADES, CATEGORIES },
   RAPIER,
   dev: (cmd: string) => devRun(cmd),
   tune: { ShelfSystem, Game },

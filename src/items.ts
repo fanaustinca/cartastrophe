@@ -23,6 +23,9 @@ export interface Item {
   shelf: number; // shelf index it was stocked on, -1 otherwise
   home: THREE.Vector3; // where it was stocked
   spawned: boolean; // came from the pool at runtime (cargo spill etc.)
+  homeYaw: number;
+  group: number; // restock group (its shelf or display), -1 for runtime spawns
+  touched: boolean; // woken / taken since it was last (re)stocked
 }
 
 interface KindBatch { kind: ItemKind; hi: THREE.InstancedMesh; lo: THREE.InstancedMesh; items: Item[]; free: Item[]; dirty: boolean }
@@ -171,6 +174,7 @@ export function itemMaterial(k: ItemKind): THREE.MeshStandardMaterial {
       .replace('#include <common>', '#include <common>\nvarying float vLab;\nvarying vec2 vLabUv;\nuniform sampler2D labelMap;')
       .replace('#include <color_fragment>', '#include <color_fragment>\nvec4 labTex = texture2D(labelMap, vLabUv) * vLab;\ndiffuseColor.rgb = diffuseColor.rgb * (1.0 - labTex.a) + labTex.rgb;');
   };
+  m.userData.label = map;
   m.customProgramCacheKey = () => 'item-label2';
   materials.set(k.id, m);
   return m;
@@ -239,7 +243,7 @@ export class ItemSystem {
     const cd = itemCollider(kind);
     if (kind.fragile) cd.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(kind.fragile.threshold);
     const collider = this.phys.world.createCollider(cd, body);
-    const it: Item = { id: this.all.length, kind, slot, body, collider, alive: true, lod: -1, cell: -1, color: new THREE.Color(color), shelf, home: pos.clone(), spawned: false };
+    const it: Item = { id: this.all.length, kind, slot, body, collider, alive: true, lod: -1, cell: -1, color: new THREE.Color(color), shelf, home: pos.clone(), spawned: false, homeYaw: yaw, group: -1, touched: false };
     b.items.push(it);
     b.lo.count = b.items.length;
     b.lo.setColorAt(slot, it.color);
@@ -256,6 +260,7 @@ export class ItemSystem {
   remove(it: Item) {
     if (!it.alive) return;
     it.alive = false;
+    it.touched = true;
     const t = it.body.translation(), top = t.y - it.kind.size[1] / 2 - 0.02;
     it.body.setEnabled(false);
     // whatever was resting on it (stacked pallets, pyramids) must fall, not hover
@@ -266,6 +271,24 @@ export class ItemSystem {
     b.dirty = true;
     this.unplace(it);
     if (it.spawned) b.free.push(it);
+  }
+
+  /** Put a stocked item back where it came from (restocking). Leaves it awake; the caller settles it. */
+  restore(it: Item) {
+    if (!it.alive) {
+      it.alive = true;
+      it.body.setEnabled(true);
+      it.lod = -1;
+      this.batch(it.kind).dirty = true;
+    }
+    it.body.setTranslation(it.home, true);
+    it.body.setRotation(_q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, it.homeYaw), true);
+    it.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    it.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    it.lod = -1;
+    it.touched = false;
+    this.wdWokeY.delete(it);
+    this.place(it);
   }
 
   /** Reuse a pooled body (or a free slot) to put a loose item into the world. */
@@ -308,7 +331,7 @@ export class ItemSystem {
   syncActive() {
     this.phys.world.forEachActiveRigidBody((b) => {
       const it = this.byBody.get(b.handle);
-      if (it && it.alive) this.place(it);
+      if (it && it.alive) { this.place(it); it.touched = true; }
     });
   }
 

@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { MESS, MessType } from './config';
 
-export interface Slick { type: MessType; x: number; z: number; r: number; target: number; grow: number; slot: number; active: boolean; seed: number }
+export interface Slick { type: MessType; x: number; z: number; r: number; target: number; grow: number; slot: number; active: boolean; seed: number; group: number }
 export interface Pad { kind: 'promo' | 'nitro'; x: number; z: number; hw: number; hd: number; yaw: number; cos: number; sin: number }
 
 const MESS_IDX: Record<MessType, number> = { egg: 0, milk: 1, oil: 2, soda: 3, mayo: 4 };
@@ -131,7 +131,7 @@ export class Hazards {
     this.puddles.renderOrder = 1;
     for (let i = 0; i < this.capacity; i++) {
       this.puddles.setMatrixAt(i, ZERO);
-      this.slicks.push({ type: 'egg', x: 0, z: 0, r: 0, target: 0, grow: 0, slot: i, active: false, seed: 0 });
+      this.slicks.push({ type: 'egg', x: 0, z: 0, r: 0, target: 0, grow: 0, slot: i, active: false, seed: 0, group: -1 });
     }
     this.group.add(this.puddles);
     this.padMat = new THREE.ShaderMaterial({ vertexShader: padVert, fragmentShader: padFrag, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, uniforms: { uTime: { value: 0 } } });
@@ -144,7 +144,7 @@ export class Hazards {
   }
 
   /** Pooled: when full, the oldest puddle is recycled. growTime > 0 makes it spread. */
-  addSlick(type: MessType, x: number, z: number, r: number, growTime = 0.6): Slick {
+  addSlick(type: MessType, x: number, z: number, r: number, growTime = 0.6, group = -1): Slick {
     // merge into an existing nearby slick of the same type instead of stacking decals
     for (const s of this.slicks) if (s.active && s.type === type && (s.x - x) ** 2 + (s.z - z) ** 2 < (s.target * 0.5) ** 2) {
       s.target = Math.min(s.target + r * 0.35, 3.2); s.grow = Math.max(s.grow, 1); this.growing.includes(s) || this.growing.push(s);
@@ -152,7 +152,8 @@ export class Hazards {
     }
     const s = this.slicks[this.next];
     this.next = (this.next + 1) % this.capacity;
-    s.type = type; s.x = x; s.z = z; s.target = r; s.active = true; s.seed = Math.random();
+    this.growing = this.growing.filter((g) => g !== s); // recycled slot
+    s.type = type; s.x = x; s.z = z; s.target = r; s.active = true; s.seed = Math.random(); s.group = group;
     s.r = growTime > 0 ? r * 0.15 : r;
     s.grow = growTime > 0 ? (r - s.r) / growTime : 0;
     this.aType.setX(s.slot, MESS_IDX[type]); this.aSeed.setX(s.slot, s.seed);
@@ -170,6 +171,29 @@ export class Hazards {
   }
 
   activeSlicks() { return this.slicks.filter((s) => s.active); }
+
+  removeSlick(s: Slick) {
+    if (!s.active) return;
+    s.active = false; s.r = s.target = 0;
+    this.growing = this.growing.filter((g) => g !== s);
+    this.puddles.setMatrixAt(s.slot, ZERO);
+    this.puddles.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Mop-Vac: shrink every puddle the nozzle circle (x, z, r) touches by d metres of radius. */
+  vacuum(x: number, z: number, r: number, d: number): number {
+    let n = 0;
+    for (const s of this.slicks) {
+      if (!s.active || (s.x - x) ** 2 + (s.z - z) ** 2 > (s.r + r) ** 2) continue;
+      n++;
+      s.r = Math.max(0, Math.min(s.r, s.target) - d); s.target = s.r; s.grow = 0;
+      if (s.r < 0.22) this.removeSlick(s); else this.writeSlick(s);
+    }
+    return n;
+  }
+
+  /** Mop up the mess a restocked display made. */
+  clearGroup(group: number) { for (const s of this.slicks) if (s.active && s.group === group) this.removeSlick(s); }
 
   addPads(pads: Omit<Pad, 'cos' | 'sin'>[]) {
     const g = new THREE.PlaneGeometry(1, 1);

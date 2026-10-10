@@ -353,7 +353,7 @@ console.log('\nItems & wayfinding');
 await T('products have printed labels and recognisable thumbnails', async () => {
   await solo('costplenty', 9, 0);
   const r = await E(() => {
-    const labelled = CART.game.world.items.batches.filter((b) => b.hi.material.map).map((b) => b.kind.id);
+    const labelled = CART.game.world.items.batches.filter((b) => b.hi.material.userData.label).map((b) => b.kind.id);
     const thumbs = CART.thumbs();
     // a thumbnail is a real picture: lots of opaque, varied pixels
     const img = new Image(); img.src = thumbs.find(([id]) => id === 'tp')[1];
@@ -416,6 +416,7 @@ await T('garage: buying and equipping wheels persists across reloads', async () 
   await page.waitForFunction(() => window.CART && CART.ready);
   await page.click('#btn-garage');
   await page.waitForSelector('#garage.show');
+  await page.click('#g-tabs button[data-cat="wheel"]');
   const coupons = await E(() => CART.profile.coupons);
   const buy = await page.$$eval('#g-items .card button', (bs) => bs.map((b) => b.textContent));
   const idx = buy.findIndex((t) => t.includes('150'));
@@ -453,6 +454,177 @@ await T('dev console: ` opens it, coupons / unlock / tp / win commands work', as
   assert(await E(() => CART.game.local.done), 'finish command did not check out');
   let bad = ''; try { await E(() => CART.dev('nonsense')); } catch (e) { bad = e.message; }
   assert(/unknown command/.test(bad), 'unknown command not reported: ' + bad);
+});
+
+console.log('\nGarage: carts, add-ons, engine, nitro');
+await T('garage: every tab renders, carts / add-ons / upgrades can be bought, and old saves migrate', async () => {
+  await page.goto(BASE + '?test&fresh', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.CART && CART.ready);
+  await E(() => CART.dev('coupons 5000'));
+  const tabs = await E(() => Object.keys(CART.catalog.CATEGORIES));
+  for (const c of tabs) {
+    await E((c) => CART.garage(c), c);
+    const n = await E(() => document.querySelectorAll('#g-items .card').length);
+    const want = await E((c) => CART.catalog.CATEGORIES[c].length + (c === 'engine' ? CART.catalog.UPGRADES.length : 0), c);
+    assert(n === want, `tab ${c}: ${n} cards, expected ${want}`);
+  }
+  const buy = async (id) => { await E(() => 0); await page.click(`#g-items .card[data-id="${id}"] button:last-child`); };
+  const c0 = await E(() => CART.profile.coupons);
+  await E(() => CART.garage('body')); await buy('body:double');
+  await E(() => CART.garage('addon')); await buy('addon:vacuum');
+  await E(() => CART.garage('engine'));
+  assert(await E(() => document.querySelector('#g-items .card[data-id="up:mSpeed"] button').disabled), 'motor upgrades should be locked without a motor');
+  await buy('engine:electric'); await buy('up:mSpeed'); await buy('up:mSpeed'); await buy('up:nCap');
+  const p = await E(() => CART.profile);
+  assert(p.custom.body === 'double' && p.custom.addon === 'vacuum' && p.custom.engine === 'electric', 'not equipped: ' + JSON.stringify(p.custom));
+  assert(p.custom.up.mSpeed === 2 && p.custom.up.nCap === 1, 'upgrade levels: ' + JSON.stringify(p.custom.up));
+  const spent = 250 + 450 + 1200 + 220 + Math.round(220 * 1.75) + 160;
+  assert(p.coupons === c0 - spent, `coupons ${p.coupons}, expected ${c0 - spent}`);
+  assert(await E(() => document.getElementById('g-stats').textContent.includes('motor')), 'stats line did not update');
+  await page.screenshot({ path: 'tests/screenshots/11-garage-engine.png' });
+  // a profile saved before this update (no body / add-on / engine / upgrades) still loads
+  const old = await E(() => {
+    localStorage.setItem('cartastrophe.profile.v1', JSON.stringify({ name: 'Oldie', coupons: 77, owned: ['wheel:caster', 'skin:chrome', 'neon:none', 'squeak:classic', 'wheel:slicks'], custom: { wheel: 'slicks', skin: 'chrome', neon: 'none', squeak: 'classic' }, best: {}, quality: 'low', volume: 0.5, races: 3 }));
+    return CART.reloadProfile();
+  });
+  assert(old.custom.wheel === 'slicks' && old.custom.body === 'standard' && old.custom.addon === 'none' && old.custom.up.nPower === 0, 'migration: ' + JSON.stringify(old.custom));
+  assert(old.owned.includes('wheel:slicks') && old.owned.includes('body:standard') && old.coupons === 77, 'migration owned: ' + old.owned);
+  await E(() => CART.dev('reset'));
+});
+
+/** Drive straight down the open lane in front of the spawn for `sec`, return the end state. */
+async function dragRace(custom, input, sec = 1.6) {
+  await E((c) => CART.equip({ wheel: 'caster', body: 'standard', addon: 'none', engine: 'none', up: { mSpeed: 0, mAccel: 0, mTorque: 0, nPower: 0, nCap: 0, nRecharge: 0 }, ...c }), custom);
+  await solo('safely', 99, 0);
+  const lane = await E(() => CART.game.world.spawns[3]);
+  await E(([x, z]) => CART.teleport(x, z, Math.PI), [lane.x, lane.z]);
+  await E((i) => { CART.setInput({ throttle: 1, sprint: true, ...i }); }, input);
+  await E((sec) => CART.advance(sec), sec);
+  const st = await E(() => ({ ...CART.state(), nitro: CART.game.local.cart.nitro, nitroOn: CART.game.local.cart.nitroOn, cap: CART.game.local.cart.stats.nitroCap, mass: CART.game.local.cart.body.mass() }));
+  await E(() => CART.setInput(null));
+  return st;
+}
+
+await T('cart bodies: every one builds, drives, and has its size / weight / levels', async () => {
+  const out = {};
+  for (const b of await E(() => CART.catalog.BODIES.map((b) => b.id))) {
+    const st = await dragRace({ body: b }, {}, 1.2);
+    const extra = await E(() => { const m = CART.game.local.cart.model; return { tower: m.tower ? m.tower.count : 0, levels: m.levels.length, cols: CART.game.local.cart.colliders.length }; });
+    out[b] = { speed: st.speed, mass: st.mass, y: st.y, ...extra };
+    assert(st.speed > 4, `${b} barely moved: ${st.speed.toFixed(2)}`);
+    assert(Math.abs(st.y) < 0.1, `${b} not sitting on the floor: y=${st.y.toFixed(3)}`);
+  }
+  assert(out.giant.mass > out.standard.mass * 2 && out.mini.mass < out.standard.mass * 0.7, 'masses: ' + JSON.stringify(out));
+  assert(out.double.levels === 1 && out.triple.levels === 2 && out.tower.levels === 3 && out.tower.tower === 96, 'levels: ' + JSON.stringify(out));
+  await E(() => CART.setCam('chase'));
+  await shot(page, '12-tower-cart.png');
+  await E(() => CART.setCam('fp'));
+});
+
+await T('nitro (E) and the electric motor make you faster; the Nitro Tank holds twice as much', async () => {
+  const base = await dragRace({}, {});
+  const nitro = await dragRace({}, { nitro: true });
+  assert(nitro.speed > base.speed + 1.5, `nitro ${nitro.speed.toFixed(2)} vs ${base.speed.toFixed(2)}`);
+  assert(nitro.nitroOn && !base.nitroOn, `nitro should be firing only while E is held: ${nitro.nitroOn}/${base.nitroOn}`);
+  const motor = await dragRace({ engine: 'electric', up: { mSpeed: 5, mAccel: 5, mTorque: 0, nPower: 0, nCap: 0, nRecharge: 0 } }, {}, 1.0);
+  const base2 = await dragRace({}, {}, 1.0);
+  assert(motor.speed > base2.speed * 1.15, `motor ${motor.speed.toFixed(2)} vs legs ${base2.speed.toFixed(2)}`);
+  // riding (Space) normally coasts; with a motor it keeps accelerating
+  const rideLegs = await dragRace({}, { sprint: false, ride: true }, 1.2);
+  const rideMotor = await dragRace({ engine: 'electric' }, { sprint: false, ride: true }, 1.2);
+  assert(rideMotor.speed > rideLegs.speed + 1.5, `riding with motor ${rideMotor.speed.toFixed(2)} vs legs ${rideLegs.speed.toFixed(2)}`);
+  const tank = await dragRace({ addon: 'tank' }, {}, 0.1);
+  assert(Math.abs(tank.cap - base.cap * 2) < 0.01, `tank ${tank.cap} vs ${base.cap}`);
+  console.log(`      legs ${base.speed.toFixed(1)} · nitro ${nitro.speed.toFixed(1)} · motor(max) ${motor.speed.toFixed(1)} vs ${base2.speed.toFixed(1)} m/s`);
+});
+
+await T('Zero-Slip Treads cross an oil slick without spinning out (casters spin)', async () => {
+  const run = async (wheel) => {
+    await E((w) => CART.equip({ wheel: w, body: 'standard', addon: 'none', engine: 'none' }), wheel);
+    await solo('safely', 99, 0);
+    return E(() => {
+      const lane = CART.game.world.spawns[3], c = CART.game.local.cart;
+      CART.teleport(lane.x, lane.z, Math.PI);
+      CART.spawnSlick('oil', lane.x, lane.z - 6, 2);
+      c.body.setLinvel({ x: 0, y: 0, z: -8 }, true);
+      CART.setInput({ throttle: 1, steer: 0.3 });
+      let spins = 0; c.onSpin = () => spins++;
+      CART.advance(1.5);
+      CART.setInput(null);
+      return spins;
+    });
+  };
+  const caster = await run('caster'), zero = await run('zeroslip');
+  assert(caster >= 1, 'casters should spin out on oil');
+  assert(zero === 0, `zero-slip spun out ${zero}x`);
+});
+
+await T('Mop-Vac sucks up a puddle; the Oil Dropper (Q) leaves one behind', async () => {
+  await E(() => CART.equip({ wheel: 'caster', body: 'standard', addon: 'vacuum', engine: 'none' }));
+  await solo('safely', 99, 0);
+  const vac = await E(() => {
+    const lane = CART.game.world.spawns[3];
+    CART.teleport(lane.x, lane.z, Math.PI);
+    const s = CART.spawnSlick('egg', lane.x, lane.z - 3, 1.2);
+    CART.setInput({ throttle: 0.5 });
+    CART.advance(2.5);
+    CART.setInput(null);
+    return { active: s.active, r: s.r };
+  });
+  assert(!vac.active || vac.r < 0.6, `puddle survived the vacuum: ${JSON.stringify(vac)}`);
+  await E(() => CART.equip({ addon: 'dropper' }));
+  await solo('safely', 99, 0);
+  const drop = await E(() => {
+    const n0 = CART.game.world.hazards.activeSlicks().length, c = CART.game.local.cart, t = c.body.translation();
+    CART.setInput({ action: true }); CART.advance(0.1); CART.setInput({ action: true }); CART.advance(0.1); // held: one drop
+    CART.setInput(null); CART.advance(0.1);
+    const s = CART.game.world.hazards.activeSlicks().filter((s) => s.type === 'oil').map((s) => Math.hypot(s.x - t.x, s.z - t.z));
+    return { added: CART.game.world.hazards.activeSlicks().length - n0, charges: c.charges, nearest: Math.min(...s) };
+  });
+  assert(drop.added === 1 && drop.charges === 3, `dropper: ${JSON.stringify(drop)}`);
+  assert(drop.nearest > 1 && drop.nearest < 3, `oil should land just behind the shopper: ${JSON.stringify(drop)}`);
+  await E(() => CART.equip({ addon: 'none' }));
+});
+
+await T('a wrecked shelf restocks itself after a minute: upright, products back, mess mopped up', async () => {
+  await E(() => CART.equip({ wheel: 'caster', body: 'standard', addon: 'none', engine: 'none' }));
+  await solo('safely', 5, 0);
+  const r = await E(() => {
+    const g = CART.game, w = g.world, sh = w.shelves.shelves[Math.floor(w.shelves.shelves.length / 2)], p = sh.body.translation();
+    const grp = g.restock.groups.find((x) => x.shelf === sh);
+    // knock it over hard, and smash a fragile product off it so there's a puddle
+    sh.body.applyImpulseAtPoint({ x: sh.body.mass() * 6, y: 0, z: 0 }, { x: p.x, y: p.y + 1.8, z: p.z }, true);
+    CART.advance(3);
+    const victim = grp.items.find((it) => it.alive && it.kind.fragile) ?? grp.items.find((it) => it.alive);
+    if (victim.kind.fragile) g.smash(victim, 999, false); else w.items.remove(victim);
+    if (!w.hazards.activeSlicks().some((s) => s.group === grp.index)) w.hazards.addSlick('oil', p.x + 1, p.z, 1, 0, grp.index);
+    const before = { toppled: sh.toppled, tilt: sh.tilt, gone: grp.items.filter((it) => !it.alive).length, off: grp.items.filter((it) => it.alive && it.body.translation().y < it.home.y - 0.2).length };
+    // parked right next to it: staff wait for you to move
+    CART.teleport(p.x - 1.9, p.z, 0);
+    CART.advance(63);
+    const blocked = grp.items.some((it) => !it.alive);
+    CART.teleport(p.x - 12, p.z, 0);
+    CART.advance(1.2);
+    const t = sh.body.translation();
+    const after = {
+      tilt: sh.tilt, dx: Math.hypot(t.x - sh.home.x, t.z - sh.home.z),
+      dead: grp.items.filter((it) => !it.alive).length,
+      displaced: grp.items.filter((it) => { const q = it.body.translation(); return Math.abs(q.y - it.home.y) > 0.06 || Math.hypot(q.x - it.home.x, q.z - it.home.z) > 0.08; }).length,
+      slicks: w.hazards.activeSlicks().filter((s) => s.group === grp.index).length,
+      count: g.restock.count,
+    };
+    CART.advance(3);
+    return { before, blocked, after, awake: CART.stats().awake, items: grp.items.length };
+  });
+  assert(r.before.gone >= 1 && (r.before.toppled || r.before.off > 10), 'setup did not wreck the shelf: ' + JSON.stringify(r));
+  assert(r.blocked, 'restocked while a cart was parked against it: ' + JSON.stringify(r));
+  assert(r.after.count >= 1 && r.after.tilt < 0.02 && r.after.dx < 0.02, 'shelf not stood back up: ' + JSON.stringify(r));
+  assert(r.after.dead === 0 && r.after.displaced <= 1, 'products not back: ' + JSON.stringify(r));
+  assert(r.after.slicks === 0, 'mess not mopped up: ' + JSON.stringify(r));
+  assert(r.awake < 60, 'restocked stock did not settle back to sleep: ' + JSON.stringify(r));
+  await E(([x, z]) => CART.view([x - 4, 2.4, z + 3, x, 1, z]), await E(() => { const sh = CART.game.world.shelves.shelves[Math.floor(CART.game.world.shelves.shelves.length / 2)]; return [sh.home.x, sh.home.z]; }));
+  await shot(page, '13-restocked.png');
+  await E(() => CART.view(null));
 });
 
 console.log('\nMultiplayer (P2P protocol over BroadcastChannel)');
@@ -518,6 +690,12 @@ async function mpTest(query, maxErr) {
   });
   assert(typeof id === 'number', JSON.stringify(id));
   await host.page.waitForFunction((id) => !CART.game.world.items.all[id].alive, { timeout: 5000, polling: 100 }, id);
+  // an oil drop on the client, and a restock decided by the host, happen on both peers
+  const n0 = await H(() => CART.game.world.hazards.activeSlicks().length);
+  await C(() => CART.game.dropOil(CART.state().x, CART.state().z + 2, CART.game.local, true));
+  await host.page.waitForFunction((n0) => CART.game.world.hazards.activeSlicks().length > n0, { timeout: 5000, polling: 100 }, n0);
+  const grp = await H(() => { const g = CART.game.restock.groups.find((x) => x.shelf); CART.game.world.items.remove(g.items[0]); CART.game.doRestock(g.index, true); return { i: g.index, id: g.items[0].id }; });
+  await client.page.waitForFunction((g) => CART.game.restock.count >= 1 && CART.game.world.items.all[g.id].alive, { timeout: 5000, polling: 100 }, grp);
   await host.page.screenshot({ path: 'tests/screenshots/07-mp-host' + (query ? '-lag' : '') + '.png' });
   await client.page.screenshot({ path: 'tests/screenshots/07-mp-client' + (query ? '-lag' : '') + '.png' });
   assert(host.errors.length === 0 && client.errors.length === 0, 'console errors: ' + [...host.errors, ...client.errors].join('\n'));
