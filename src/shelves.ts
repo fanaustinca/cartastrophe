@@ -98,7 +98,7 @@ const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quatern
 
 export class ShelfSystem {
   /** Righting spring (rad/s² per rad) and damper. */
-  static K = 6;
+  static K = 5;
   static C = 1.5;
   shelves: Shelf[] = [];
   byCollider = new Map<number, Shelf>();

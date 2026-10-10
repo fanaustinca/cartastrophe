@@ -54,11 +54,11 @@ export interface NetHooks {
 
 const _v = new THREE.Vector3();
 /** Cart speed (m/s) needed to knock a shelf over: sprinting (9.4) or boosting does it, jogging (6.6) doesn't. */
-export const SHELF_TIP_SPEED = 7.6;
+export const SHELF_TIP_SPEED = 7.0;
 const lerpAngle = (a: number, b: number, t: number) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
 
 export class Game {
-  static SHOVE = 2.6;
+  static SHOVE = 3.0;
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   phys = new Physics();

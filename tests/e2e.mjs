@@ -35,6 +35,34 @@ await T('boots to the title screen with no console errors', async () => {
   assert(errors.length === 0, 'console errors: ' + errors.join('\n'));
 });
 
+await T('shadows on (medium quality): every draw is valid, so shelves are visibly stocked', async () => {
+  // regression: an unsupported shadow-map type left every shadow-receiving mesh with a mismatched
+  // sampler, the GPU skipped those draws, and the shelves rendered empty
+  const p2 = await browser.newPage();
+  await p2.evaluateOnNewDocument(() => {
+    localStorage.setItem('cartastrophe.profile.v1', JSON.stringify({ quality: 'medium' }));
+    window.__glErr = 0;
+    const P = WebGL2RenderingContext.prototype;
+    for (const k of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
+      const f = P[k];
+      P[k] = function (...a) { const r = f.apply(this, a); if (this.getError()) window.__glErr++; return r; };
+    }
+  });
+  await p2.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await p2.waitForFunction(() => window.CART && window.CART.ready, { polling: 100 });
+  const r = await p2.evaluate(async () => {
+    CART.manual = true;
+    await CART.startSolo('bullseye', { seed: 7, skipCountdown: true });
+    CART.view([-8.4, 1.4, -12.5, -11, 1.0, -12.5]);
+    CART.render();
+    return { err: window.__glErr, shadows: CART.game.world.items.batches[0].hi.castShadow, px: CART.pixelStats() };
+  });
+  await p2.close();
+  assert(r.shadows, 'medium quality should have shadows on');
+  assert(r.err === 0, `${r.err} draw calls failed with GL errors`);
+  assert(r.px.colors > 150, `shelf close-up looks empty: ${JSON.stringify(r.px)}`);
+});
+
 const STORES = ['costplenty', 'bullseye', 'wholefarm', 'bestbuyout', 'safely'];
 for (const id of STORES) {
   await T(`store "${id}" builds, stocks thousands of items and renders`, async () => {
@@ -127,6 +155,9 @@ await T('shelves are sturdy: a jogging bump only rocks one, a sprint ram topples
   const ram = await run(9.4);
   assert(ram.toppled === 1, `sprint ram should topple exactly the shelf hit: ${JSON.stringify(ram)}`);
   assert(ram.tilted <= 1, `neighbouring shelves went over too (domino): ${JSON.stringify(ram)}`);
+  await solo('bullseye', 5, 0);
+  const fast = await run(7.6); // a quick run-up (not a full sprint) is enough these days
+  assert(fast.toppled === 1, `a 7.6 m/s ram should tip it: ${JSON.stringify(fast)}`);
 });
 
 await T('nothing is left hovering: stock falls when its shelf tips or the item under it is taken', async () => {

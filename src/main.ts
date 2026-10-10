@@ -35,7 +35,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in three r18x; asking for it left receivers with a mismatched shadow sampler (nothing drawn)
 const maxRatio = Math.min(window.devicePixelRatio || 1, profile.quality === 'high' ? 2 : 1.5);
 let pixelRatio = TEST ? 1 : maxRatio;
 renderer.setPixelRatio(pixelRatio);

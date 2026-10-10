@@ -153,21 +153,25 @@ const materials = new Map<string, THREE.MeshStandardMaterial>();
  * One material per item kind (each kind is already its own InstancedMesh, so no extra draw calls).
  * Color = instance color, toned toward grey on caps/rims, with the premultiplied label composited on top.
  */
+const BLANK = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+BLANK.needsUpdate = true;
 export function itemMaterial(k: ItemKind): THREE.MeshStandardMaterial {
   const hit = materials.get(k.id);
   if (hit) return hit;
   const map = labelTexture(k);
-  const m = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.05, map });
+  // The label goes in its own sampler, not `map`: patching three's map path broke the draw
+  // ("texture format / sampler type mismatch") whenever shadows were on, i.e. empty shelves.
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.05 });
   m.onBeforeCompile = (sh) => {
+    sh.uniforms.labelMap = { value: map ?? BLANK };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aTone;\nattribute float aLab;\nvarying float vLab;')
-      .replace('#include <color_vertex>', '#include <color_vertex>\nvLab = aLab;\n#ifdef USE_INSTANCING_COLOR\nvColor.rgb = mix(vColor.rgb, vec3(aTone.x), aTone.y);\n#endif');
+      .replace('#include <common>', '#include <common>\nattribute vec2 aTone;\nattribute float aLab;\nvarying float vLab;\nvarying vec2 vLabUv;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\nvLab = aLab;\nvLabUv = uv;\n#ifdef USE_INSTANCING_COLOR\nvColor.rgb = mix(vColor.rgb, vec3(aTone.x), aTone.y);\n#endif');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vLab;')
-      .replace('#include <map_fragment>', '#ifdef USE_MAP\nvec4 labTex = texture2D(map, vMapUv) * vLab;\n#else\nvec4 labTex = vec4(0.0);\n#endif')
-      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = diffuseColor.rgb * (1.0 - labTex.a) + labTex.rgb;');
+      .replace('#include <common>', '#include <common>\nvarying float vLab;\nvarying vec2 vLabUv;\nuniform sampler2D labelMap;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\nvec4 labTex = texture2D(labelMap, vLabUv) * vLab;\ndiffuseColor.rgb = diffuseColor.rgb * (1.0 - labTex.a) + labTex.rgb;');
   };
-  m.customProgramCacheKey = () => 'item-label' + (map ? '1' : '0');
+  m.customProgramCacheKey = () => 'item-label2';
   materials.set(k.id, m);
   return m;
 }
