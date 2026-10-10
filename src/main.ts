@@ -1,16 +1,18 @@
 // App shell: renderer, menus, garage/shop, lobby flow, main loop, adaptive resolution, test API.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { initPhysics } from './physics';
+import { initPhysics, RAPIER } from './physics';
 import { Game, RaceConfig, ResultRow, SLOT_COLORS } from './game';
 import { Hud } from './hud';
 import { Sfx } from './audio';
 import { Session, randomCustom } from './session';
 import { lobbyCode, LocalTransport } from './net';
 import { loadProfile, saveProfile, Profile, CATEGORIES, Category } from './save';
-import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS } from './config';
+import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName } from './config';
 import { CartModel } from './cart';
+import { ShelfSystem } from './shelves';
 import { logoTexture } from './textures';
+import { thumbCanvas, thumbUrl } from './thumbs';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
@@ -39,6 +41,8 @@ let pixelRatio = TEST ? 1 : maxRatio;
 renderer.setPixelRatio(pixelRatio);
 const pmrem = new THREE.PMREMGenerator(renderer);
 const envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+hud.thumb = (id) => thumbCanvas(renderer, id);
+hud.thumbUrl = (id) => thumbUrl(renderer, id);
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -226,7 +230,7 @@ async function startRace(cfg: RaceConfig, slot: number, s: Session | null, start
   $('loading-text').textContent = `Stocking ${STORE_BY_ID[cfg.storeId].name}…`;
   await new Promise((r) => setTimeout(r, 30)); // let the loading screen paint
   const t0 = performance.now();
-  game = new Game(cfg, slot, sfx, { quality: TEST ? 'low' : profile.quality, envMap, net: s ? { event: (e) => s.event(e), isHost: s.isHost, clock: s.clock } : null, aspect: window.innerWidth / Math.max(1, window.innerHeight) });
+  game = new Game(cfg, slot, sfx, { quality: TEST ? 'low' : profile.quality, envMap, net: s ? { event: (e) => s.event(e), isHost: s.isHost, clock: s.clock } : null, aspect: window.innerWidth / Math.max(1, window.innerHeight), thumb: (id) => thumbCanvas(renderer, id) });
   game.startAt = startAt;
   game.onEnd = (r) => setTimeout(() => resultsScreen(r), 1200);
   s?.attach(game);
@@ -272,15 +276,90 @@ $('btn-menu').onclick = () => { endGame(); session?.close(); session = null; tit
 $('btn-resume').onclick = () => { paused = false; show(null); hud.show(true); };
 $('btn-quit').onclick = () => { paused = false; endGame(); session?.close(); session = null; titleScreen(); };
 
+// ---------------- dev console (` key) ----------------
+const DEV_HELP = `coupons [n]      add coupons (default 10000)
+unlock           own every wheel / skin / neon / squeak
+reset            wipe your profile back to a fresh start
+win              tick off your whole shopping list (then drive to a checkout)
+finish           check out right now
+time <sec>       set the race clock's time left
+tp <item|checkout>  teleport next to the nearest <item> on your list, or a checkout
+freeze           pause / unpause the bots
+topple           knock every shelf over (chaos)
+help             this list`;
+function devLog(s: string) { const o = $('dev-out'); o.textContent += s + '\n'; o.scrollTop = o.scrollHeight; }
+function devRun(line: string): string {
+  const [cmd, ...args] = line.trim().split(/\s+/);
+  const g = game;
+  const needGame = () => { if (!g) throw new Error('start a race first'); return g; };
+  const refresh = () => { saveProfile(profile); $('coupons').textContent = String(profile.coupons); if ($('garage').classList.contains('show')) garageScreen('wheel'); };
+  switch ((cmd ?? '').toLowerCase()) {
+    case '': return '';
+    case 'help': case '?': return DEV_HELP;
+    case 'coupons': case 'money': case 'cash': {
+      const n = Number(args[0] ?? 10000);
+      if (!Number.isFinite(n)) throw new Error('usage: coupons 5000');
+      profile.coupons = Math.max(0, Math.round(profile.coupons + n)); refresh();
+      return `🎟 ${profile.coupons} coupons`;
+    }
+    case 'unlock': case 'unlockall': {
+      for (const [c, list] of Object.entries(CATEGORIES)) for (const it of list) if (!profile.owned.includes(`${c}:${it.id}`)) profile.owned.push(`${c}:${it.id}`);
+      refresh(); return `unlocked all ${profile.owned.length} shop items`;
+    }
+    case 'reset': profile = loadProfile(true); saveProfile(profile); refreshGarageCart(); refresh(); return 'profile reset';
+    case 'win': case 'finish': {
+      const gg = needGame(), me = gg.local;
+      for (const e of gg.cfg.list) { const have = me.collected[e.kind] ?? 0; for (let i = have; i < e.qty; i++) { me.collected[e.kind] = i + 1; me.cargo.push(e.kind); } }
+      me.cart.model.setCargo(me.cargo);
+      if (cmd.toLowerCase() === 'finish') { if (gg.phase === 'race') gg.finish(me, gg.raceTime); return 'checked out'; }
+      return 'list complete — head to a checkout';
+    }
+    case 'time': { const gg = needGame(), n = Number(args[0]); if (!Number.isFinite(n)) throw new Error('usage: time 60'); gg.raceTime = Math.max(0, gg.cfg.time - n); return `${n}s left`; }
+    case 'tp': {
+      const gg = needGame(), what = (args.join(' ') || 'checkout').toLowerCase();
+      if (what === 'checkout') { const l = gg.world.lanes[Math.floor(gg.world.lanes.length / 2)]; gg.local.cart.reset(l.x, l.z + 2.5, Math.PI); return 'at the checkouts'; }
+      gg.guides.refresh();
+      const c = gg.guides.clusters.find((x) => x.kind.includes(what) || kindName(x.kind).toLowerCase().includes(what)) ?? (what === 'next' ? gg.guides.nearest : null);
+      if (!c) throw new Error(`nothing on your list matches "${what}"`);
+      const [i, j] = gg.world.nav.nearestFree(c.x, c.z);
+      gg.local.cart.reset(gg.world.nav.wx(i), gg.world.nav.wz(j), gg.local.cart.yaw);
+      return `teleported to ${kindName(c.kind)} (${c.where})`;
+    }
+    case 'freeze': { const gg = needGame(); gg.botsFrozen = !gg.botsFrozen; return gg.botsFrozen ? 'bots frozen' : 'bots unfrozen'; }
+    case 'topple': {
+      const gg = needGame();
+      for (const sh of gg.world.shelves.shelves) { const t = sh.body.translation(); sh.body.applyImpulseAtPoint({ x: (Math.random() - 0.5) * 900, y: 0, z: (Math.random() - 0.5) * 900 }, { x: t.x, y: t.y + 2, z: t.z }, true); }
+      return 'timber!';
+    }
+    default: throw new Error(`unknown command "${cmd}" — type help`);
+  }
+}
+function devToggle(on = $('dev').classList.contains('hidden')) {
+  $('dev').classList.toggle('hidden', !on);
+  // focus right away: the ` keydown was preventDefault'ed, so the character itself isn't typed
+  if (on) { keys.clear(); $<HTMLInputElement>('dev-in').focus(); if (!$('dev-out').textContent) devLog('dev console — type help'); }
+  else $<HTMLInputElement>('dev-in').blur();
+}
+$('dev-in').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.code === 'Backquote' || e.code === 'Escape') { e.preventDefault(); devToggle(false); return; }
+  if (e.key !== 'Enter') return;
+  const inp = $<HTMLInputElement>('dev-in'), line = inp.value; inp.value = '';
+  devLog('> ' + line);
+  try { const r = devRun(line); if (r) devLog(r); } catch (er) { devLog('✗ ' + (er as Error).message); }
+});
+
 // ---------------- input ----------------
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'INPUT') return;
+  if (e.code === 'Backquote') { e.preventDefault(); devToggle(); return; }
   keys.add(e.code);
   if (e.code === 'Space') e.preventDefault();
   if (!game) return;
   if (e.code === 'KeyC') game.setCamMode(game.camMode === 'fp' ? 'chase' : 'fp');
   if (e.code === 'KeyR') game.resetLocal();
+  if (e.code === 'KeyM' || e.code === 'Tab') { e.preventDefault(); hud.toggleMap(); }
   if (e.code === 'Escape' && game.phase !== 'over') {
     if (session) return; // can't pause a networked race
     paused = !paused; show(paused ? 'pause' : null); hud.show(!paused);
@@ -436,12 +515,16 @@ const api = {
     const p = game?.players.find((q) => q.slot === slot);
     if (!p) return null;
     const t = p.cart.body.translation();
-    return { x: t.x, z: t.z, remote: p.remote, buffered: p.interp?.buf.length ?? 0, extrapolating: p.interp?.out.extrapolating ?? false, items: game!.itemsCollected(p) };
+    return { x: t.x, z: t.z, simT: game!.simTime, remote: p.remote, buffered: p.interp?.buf.length ?? 0, extrapolating: p.interp?.out.extrapolating ?? false, items: game!.itemsCollected(p) };
   },
   setName: (n: string) => { profile.name = n; },
   equip: (c: Partial<Customization>) => { Object.assign(profile.custom, c); saveProfile(profile); refreshGarageCart(); },
   reloadProfile: () => { profile = loadProfile(); return profile; },
   catalog: { WHEELS, SKINS, NEONS },
+  RAPIER,
+  dev: (cmd: string) => devRun(cmd),
+  tune: { ShelfSystem, Game },
+  thumbs: () => ITEM_KINDS.map((k) => [k.id, thumbUrl(renderer, k.id)]),
 };
 (window as unknown as { CART: typeof api }).CART = api;
 

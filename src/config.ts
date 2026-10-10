@@ -35,9 +35,12 @@ export const ITEM_KINDS: ItemKind[] = [
   { id: 'game', label: 'Video Game', icon: '🎮', shape: 'box', size: [0.14, 0.18, 0.02], mass: 0.15, colors: [0x2050e0, 0x10a040, 0xd02020] },
   { id: 'microwave', label: 'Microwave', icon: '🔲', shape: 'box', size: [0.5, 0.32, 0.38], mass: 7.0, colors: [0xc8b898] },
   { id: 'energy', label: 'Volt Energy', icon: '⚡', shape: 'can', size: [0.066, 0.16, 0.066], mass: 0.5, colors: [0x101010, 0x60e020, 0x2060ff] },
-  { id: 'bread', label: 'Bread Loaf', icon: '🍞', shape: 'bag', size: [0.13, 0.13, 0.28], mass: 0.6, colors: [0xd8a060, 0xb87a40] },
+  { id: 'bread', label: 'Bread Loaf', icon: '🍞', shape: 'bag', size: [0.28, 0.13, 0.13], mass: 0.6, colors: [0xd8a060, 0xb87a40] },
   { id: 'detergent', label: 'Laundry Soap', icon: '🧴', shape: 'jug', size: [0.2, 0.3, 0.13], mass: 4.5, colors: [0xf07a10, 0x2080e0, 0x8020c0] },
 ];
+/** Plain product name for signs and the list ("Frosted Flakez" is a brand; "Cereal" is what you look for). */
+const PLAIN: Record<string, string> = { cereal: 'Cereal', soup: 'Soup', soda: 'Soda', eggs: 'Eggs', milk: 'Milk', oil: 'Olive Oil', chips: 'Chips', pasta: 'Pasta', mayo: 'Mayo', tp: 'Toilet Paper', dogfood: 'Dog Food', apple: 'Apples', melon: 'Watermelon', avocado: 'Avocados', kombucha: 'Kombucha', tv: 'TVs', headphones: 'Headphones', game: 'Video Games', microwave: 'Microwaves', energy: 'Energy Drinks', bread: 'Bread', detergent: 'Detergent' };
+export const kindName = (id: string) => PLAIN[id] ?? id;
 export const KIND_BY_ID: Record<string, ItemKind> = Object.fromEntries(ITEM_KINDS.map((k) => [k.id, k]));
 
 export interface StoreDef {

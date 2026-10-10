@@ -8,6 +8,7 @@ import { Bot } from './bots';
 import { Interpolator, Snap, Clock } from './net';
 import { Customization, KIND_BY_ID, STORE_BY_ID, LIST_SIZE, MESS, INTERP_DELAY } from './config';
 import { Rng } from './rng';
+import { Guides } from './guides';
 import type { Item } from './items';
 import type { Sfx } from './audio';
 
@@ -52,9 +53,12 @@ export interface NetHooks {
 }
 
 const _v = new THREE.Vector3();
+/** Cart speed (m/s) needed to knock a shelf over: sprinting (9.4) or boosting does it, jogging (6.6) doesn't. */
+export const SHELF_TIP_SPEED = 7.6;
 const lerpAngle = (a: number, b: number, t: number) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
 
 export class Game {
+  static SHOVE = 2.6;
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   phys = new Physics();
@@ -89,9 +93,11 @@ export class Game {
   private tmpItems: Item[] = [];
   private envMap: THREE.Texture | null;
   readonly authority: boolean;
+  guides: Guides;
+  botsFrozen = false;
   readonly isSolo: boolean;
 
-  constructor(public cfg: RaceConfig, public localSlot: number, private sfx: Sfx, opts: { quality: 'low' | 'medium' | 'high'; envMap: THREE.Texture | null; net?: NetHooks | null; aspect: number }) {
+  constructor(public cfg: RaceConfig, public localSlot: number, private sfx: Sfx, opts: { quality: 'low' | 'medium' | 'high'; envMap: THREE.Texture | null; net?: NetHooks | null; aspect: number; thumb?: (id: string) => HTMLCanvasElement }) {
     this.net = opts.net ?? null;
     this.isSolo = !this.net;
     this.authority = !this.net || this.net.isHost;
@@ -115,7 +121,7 @@ export class Game {
     }
     this.scene.add(this.sun, this.sun.target);
 
-    this.world = new StoreWorld(this.phys, def, cfg.seed, { shadows, envMap: this.envMap });
+    this.world = new StoreWorld(this.phys, def, cfg.seed, { shadows, envMap: this.envMap, thumb: opts.thumb });
     if (opts.quality === 'low') { this.world.items.hiDist = 9; this.world.items.cullDist = 45; this.world.shelves.lodDist = 25; }
     if (opts.quality === 'high') { this.world.items.hiDist = 22; this.world.items.cullDist = 90; }
     this.scene.add(this.world.group);
@@ -131,6 +137,8 @@ export class Game {
     this.camYaw = this.local.cart.yaw;
     this.setCamMode('fp');
     if (this.isSolo) this.countdown = 3;
+    this.guides = new Guides(this, opts.thumb ?? null);
+    this.guides.refresh();
   }
 
   addPlayer(info: PlayerInfo) {
@@ -201,15 +209,17 @@ export class Game {
     if (racing && !this.local.done) Object.assign(L.input, src);
     else { L.input.throttle = 0; L.input.steer = 0; L.input.sprint = false; L.input.ride = false; if (this.local.done) L.input.throttle = L.fwdSpeed > 0.3 ? -0.5 : 0; }
     // bots
-    for (const p of this.players) if (p.bot) { if (racing) p.bot.update(dt); else { p.cart.input.throttle = 0; p.cart.input.steer = 0; } }
+    for (const p of this.players) if (p.bot) { if (racing && !this.botsFrozen) p.bot.update(dt); else { p.cart.input.throttle = 0; p.cart.input.steer = 0; } }
     // drive dynamic carts, pose kinematic (remote) carts from the interpolator
     const renderT = this.net ? this.net.clock.hostNow() - INTERP_DELAY : 0;
     for (const p of this.players) {
       if (!p.remote) p.cart.control(dt, this.world.hazards);
       else if (p.interp) { const o = p.interp.sample(renderT, dt); if (o) p.cart.moveTo(o.x, Math.max(0, o.y), o.z, o.yaw); }
     }
+    this.world.shelves.stabilize(dt);
     this.phys.step();
     this.world.items.syncActive();
+    this.world.items.watchdog(dt);
     this.simTime += dt;
     this.bumpT -= dt;
 
@@ -271,18 +281,21 @@ export class Game {
 
   private onCartImpact(p: Participant, force: number, other: number) {
     const sh = this.world.shelves.byCollider.get(other);
-    const sp = p.cart.speed();
+    const sp = Math.max(p.cart.speed(), p.cart.preSpeed);
     if (p === this.local && force > 3000) {
       this.shake = Math.min(1, Math.max(this.shake, force / 30000));
       if (sp > 2) this.sfx.crash(force);
     }
-    // dramatize shelf hits: extra shove near the top so they rock and topple
-    if (sh && sp > 2.5 && !p.remote) {
+    // dramatize shelf hits: a shove near the top. Normal-speed bumps only rock the shelf
+    // (the stabilizer rights it); a sprinting / boosted ram is what sends it over.
+    if (sh && sp > 3 && !p.remote) {
       const last = this.shelfHitT.get(sh.index) ?? -9;
       if (this.simTime - last > 0.35) {
         this.shelfHitT.set(sh.index, this.simTime);
-        const v = p.cart.body.linvel();
-        const k = Math.min(1.2, (sp - 2) / 6) * CART.mass * 0.32;
+        // direction of travel before the impact (afterwards the cart has bounced)
+        const pv = Math.hypot(p.cart.preVx, p.cart.preVz) || 1;
+        const v = { x: p.cart.preVx / pv, z: p.cart.preVz / pv };
+        const k = (sp > SHELF_TIP_SPEED ? Math.min(1.6, 1 + (sp - SHELF_TIP_SPEED) / 4) : 0) * sh.body.mass() * Game.SHOVE;
         const st = sh.body.translation();
         const H = this.world.def.shelfHeight;
         sh.body.applyImpulseAtPoint({ x: v.x * k, y: 0, z: v.z * k }, { x: st.x, y: st.y + H * 0.85, z: st.z }, true);
@@ -386,6 +399,7 @@ export class Game {
     }
     this.updateCamera(dt);
     this.world.update(dt, time, this.camera);
+    this.guides.update(dt, time);
     // shadow camera follows the player
     const ct = this.local.cart.model.root.position;
     this.sun.position.set(ct.x + 8, 20, ct.z + 6); this.sun.target.position.set(ct.x, 0, ct.z);

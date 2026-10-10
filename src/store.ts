@@ -14,12 +14,12 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RAPIER, Physics, G, groups, ALL } from './physics';
 import { Rng } from './rng';
-import { StoreDef, ITEM_KINDS, KIND_BY_ID, ItemKind } from './config';
+import { StoreDef, ITEM_KINDS, KIND_BY_ID, ItemKind, kindName } from './config';
 import { ShelfSystem, SHELF_LEN, SHELF_DEPTH, shelfLayout } from './shelves';
 import { ItemSystem } from './items';
 import { Hazards, Pad } from './hazards';
 import { NavGrid } from './nav';
-import { floorTexture, logoTexture, signTexture, tvScreen } from './textures';
+import { floorTexture, logoTexture, signTexture, aisleSignTexture, tvScreen } from './textures';
 
 export interface Lane { x: number; z: number; hw: number; hd: number }
 export interface Spawn { x: number; z: number; yaw: number }
@@ -40,14 +40,20 @@ export class StoreWorld {
   checkoutZ = 0;
   bounds: { w: number; d: number };
   aisleSigns: { x: number; z: number; label: string }[] = [];
+  /** Named areas for "where is it" hints: exact aisle rectangles, then nearest landmark. */
+  aisleZones: { x0: number; x1: number; z0: number; z1: number; name: string }[] = [];
+  landmarks: { x: number; z: number; name: string }[] = [];
+  aisleCenter = new Map<string, number>();
+  private thumb: ((id: string) => HTMLCanvasElement) | null;
   private staticParts = new Map<number, THREE.BufferGeometry[]>();
   private staticEmissive: THREE.BufferGeometry[] = [];
   private tv: ReturnType<typeof tvScreen> | null = null;
   private dynTimer = 0;
   private shadows: boolean;
 
-  constructor(private phys: Physics, public def: StoreDef, seed: number, opts: { shadows: boolean; envMap: THREE.Texture | null }) {
+  constructor(private phys: Physics, public def: StoreDef, seed: number, opts: { shadows: boolean; envMap: THREE.Texture | null; thumb?: (id: string) => HTMLCanvasElement }) {
     this.shadows = opts.shadows;
+    this.thumb = opts.thumb ?? null;
     const rng = new Rng(seed ^ 0x5eed);
     const [W, D] = def.size;
     this.bounds = { w: W, d: D };
@@ -70,7 +76,10 @@ export class StoreWorld {
     // every catalog kind gets a batch (pool headroom) even if no shelf slot used it
     for (const id of Object.keys(def.catalog)) if (!counts.has(KIND_BY_ID[id])) counts.set(KIND_BY_ID[id], 0);
     this.items.allocate(counts, this.shadows);
-    for (const p of plan) this.items.add(p.kind, p.pos, p.yaw, p.color, p.shelf);
+    for (const p of plan) {
+      const it = this.items.add(p.kind, p.pos, p.yaw, p.color, p.shelf);
+      if (p.shelf >= 0) this.shelves.shelves[p.shelf].stock.push(it);
+    }
     this.group.add(this.items.group, this.hazards.group);
     this.kindsInStore = [...new Set(plan.map((p) => p.kind.id))];
 
@@ -245,19 +254,28 @@ export class StoreWorld {
       }
     }
     // hanging aisle signs over each aisle × run with what's stocked there
+    this.runsTmp = [[z0, z0 + runLen], [z0 + runLen + cross, z0 + 2 * runLen + cross]];
     for (let a = 0; a <= lines; a++) {
-      const ax = x0 + (a - 0.5) * pitch;
-      if (a === 0 || a === lines) continue;
+      // a = 0 / lines are the outer faces of the block: real aisles too (along produce / egg tables)
+      const ax = x0 + (a - 0.5) * pitch + (a === 0 ? 0.6 : a === lines ? -0.6 : 0);
       aisleNo++;
       for (let run = 0; run < 2; run++) {
         const set = aisleKinds.get(a * 2 + run);
         const z = z0 + run * (runLen + cross) + runLen / 2;
-        const labels = set ? [...set].slice(0, 3).map((id) => KIND_BY_ID[id].label.split(' ')[0]).join(' · ') : '';
-        const n = aisleNo * 2 - 1 + run;
-        const tex = signTexture(`AISLE ${n}`, labels, def.colors.primary);
-        const y = Math.max(def.shelfHeight + 0.9, Math.min(def.ceiling - 0.8, 3.6));
-        this.texturedPlane(tex, 2.6, 0.97, ax, y, z, 0, true);
-        this.addBox(ax, y + 0.6, z, 0.01, 0.12, 0.01, 0x333333, { collide: false });
+        const kinds = set ? [...set].slice(0, 3) : [];
+        const labels = kinds.map((id) => KIND_BY_ID[id].label.split(' ')[0]).join(' · ');
+        // front row (nearest the checkouts, seen first) is 1…N left to right; the back row continues N+1…
+        const n = run === 1 ? aisleNo : aisleNo + lines + 1;
+        const tex = aisleSignTexture(`AISLE ${n}`, kinds.map((id) => ({ label: kindName(id), thumb: this.thumb ? this.thumb(id) : null })), def.colors.primary);
+        // hung high (just under the ceiling, well above the shelf tops) so it reads down the
+        // whole aisle and from the cross aisle / action alley
+        const y = Math.min(def.ceiling - 1.15, Math.max(def.shelfHeight + 1.35, 3.3));
+        this.texturedPlane(tex, 3.3, 1.72, ax, y, z, 0, true);
+        for (const sx of [-1.2, 1.2]) this.addBox(ax + sx, (y + 0.86 + def.ceiling) / 2, z, 0.01, (def.ceiling - y - 0.86) / 2, 0.01, 0x333333, { collide: false });
+        const zr = this.runsTmp[run];
+        this.aisleZones.push({ x0: x0 + (a - 1) * pitch, x1: x0 + a * pitch, z0: zr[0] - 1, z1: zr[1] + 1, name: `Aisle ${n}` });
+        this.landmarks.push({ x: ax, z, name: `Aisle ${n}` });
+        this.aisleCenter.set(`Aisle ${n}`, x0 + (a - 0.5) * pitch);
         this.aisleSigns.push({ x: ax, z, label: `${n}: ${labels}` });
       }
     }
@@ -268,6 +286,7 @@ export class StoreWorld {
     this.blockX = [x0 - SHELF_DEPTH / 2, x0 + (lines - 1) * pitch + SHELF_DEPTH / 2];
     return placements;
   }
+  private runsTmp: [number, number][] = [];
   crossZ = 0;
   aisleXs: number[] = [];
   runs: [number, number][] = [];
@@ -386,6 +405,7 @@ export class StoreWorld {
   }
 
   private deptSign(text: string, x: number, z: number, yaw: number, y = Math.min(this.def.ceiling - 0.7, 3.8)) {
+    if (!text.startsWith('CHECKOUT')) this.landmarks.push({ x, z, name: text.charAt(0) + text.slice(1).toLowerCase() });
     const tex = signTexture(text, '', this.def.colors.primary, 0xffffff, 512, 128);
     this.texturedPlane(tex, 3.2, 0.8, x, y, z, yaw, true);
   }
@@ -411,6 +431,7 @@ export class StoreWorld {
   private eggTable(x: number, z: number, rng: Rng, plan: PlannedItem[]) {
     // a wobbly dynamic display table: ram it and the whole egg pyramid goes over
     const top = 0.8, hw = 0.75, hd = 0.5;
+    this.landmarks.push({ x, z, name: 'Egg table' });
     const body = this.phys.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(x, 0, z).setCanSleep(true));
     const cols = [RAPIER.ColliderDesc.cuboid(hw, 0.03, hd).setTranslation(0, top, 0).setMass(12)];
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) cols.push(RAPIER.ColliderDesc.cuboid(0.03, top / 2, 0.03).setTranslation(sx * (hw - 0.05), top / 2, sz * (hd - 0.05)).setMass(2));
@@ -438,6 +459,7 @@ export class StoreWorld {
   private pallet(x: number, z: number, k: ItemKind, rng: Rng, plan: PlannedItem[]) {
     const ph = 0.14;
     this.addBox(x, ph / 2, z, 0.6, ph / 2, 0.5, 0xb08a58, { nav: false });
+    this.landmarks.push({ x, z, name: 'Pallet display' });
     this.nav.rect(this.nav.staticBlock, x, z, 0.6, 0.5, 0, 0.55, 180);
     const [w, h, d] = k.size;
     const nx = Math.max(1, Math.floor(1.2 / (w + 0.01))), nz = Math.max(1, Math.floor(1.0 / (d + 0.01)));
@@ -526,6 +548,14 @@ export class StoreWorld {
     void D;
   }
   private drumLabels: [RAPIER.RigidBody, THREE.Mesh][] = [];
+
+  /** Human-readable location, e.g. "Aisle 7", "Dairy", "Pallet display". */
+  whereIs(x: number, z: number): string {
+    for (const a of this.aisleZones) if (x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1) return a.name;
+    let best = '', bd = Infinity;
+    for (const l of this.landmarks) { const d = (l.x - x) ** 2 + (l.z - z) ** 2; if (d < bd) { bd = d; best = l.name; } }
+    return best;
+  }
 
   // ---------------- per-frame ----------------
   update(dt: number, time: number, camera: THREE.Camera) {

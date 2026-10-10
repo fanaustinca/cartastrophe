@@ -16,7 +16,13 @@ export interface Shelf {
   tilt: number; // radians from upright
   moved: boolean; // displaced/tipped enough to matter for navigation
   wasAwake: boolean;
+  toppled: boolean; // tipped past the point of no return: the stabilizer lets go
+  stock: { body: RAPIER.RigidBody; alive: boolean }[]; // items stocked on it (woken when it moves)
+  wokeAt: { x: number; y: number; z: number; tilt: number }; // pose when its stock was last woken
 }
+
+/** Beyond this tilt a shelf is going over; below it the (bolted, bottom-heavy) unit rights itself. */
+export const TIP_ANGLE = 0.42;
 
 export interface ShelfLayout { boards: number[]; spacing: number; height: number; back: boolean }
 
@@ -82,7 +88,7 @@ function shelfColliders(s: StoreDef): RAPIER.ColliderDesc[] {
   if (lay.back) out.push(RAPIER.ColliderDesc.cuboid(L / 2, H / 2, 0.02).setTranslation(0, H / 2, 0).setDensity(260 * heavy));
   for (const x of [-L / 2 + 0.02, L / 2 - 0.02]) out.push(RAPIER.ColliderDesc.cuboid(0.02, H / 2, D / 2).setTranslation(x, H / 2, 0).setDensity(180 * heavy));
   for (const y of lay.boards) out.push(RAPIER.ColliderDesc.cuboid(L / 2 - 0.03, 0.0125, D / 2 - 0.01).setTranslation(0, y, 0).setDensity(200 * heavy));
-  for (const c of out) c.setFriction(0.85).setRestitution(0.05).setCollisionGroups(groups(G.SHELF, ALL))
+  for (const c of out) c.setFriction(0.85).setRestitution(0.05).setCollisionGroups(groups(G.SHELF, ALL & ~G.SHELF))
     .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(1500);
   return out;
 }
@@ -91,6 +97,9 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3();
 
 export class ShelfSystem {
+  /** Righting spring (rad/s² per rad) and damper. */
+  static K = 6;
+  static C = 1.5;
   shelves: Shelf[] = [];
   byCollider = new Map<number, Shelf>();
   mesh!: THREE.InstancedMesh;
@@ -112,7 +121,7 @@ export class ShelfSystem {
         RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x, 0.001, p.z).setRotation(q)
           .setCanSleep(true).setAngularDamping(0.25).setLinearDamping(0.2),
       );
-      const sh: Shelf = { index: i, body, home: new THREE.Vector3(p.x, 0, p.z), yaw: p.yaw, tilt: 0, moved: false, wasAwake: true };
+      const sh: Shelf = { index: i, body, home: new THREE.Vector3(p.x, 0, p.z), yaw: p.yaw, tilt: 0, moved: false, wasAwake: true, toppled: false, stock: [], wokeAt: { x: p.x, y: 0.001, z: p.z, tilt: 0 } };
       for (const cd of cols) {
         const c = this.phys.world.createCollider(cd, body);
         this.byCollider.set(c.handle, sh);
@@ -143,6 +152,42 @@ export class ShelfSystem {
       dirty = true;
     }
     if (dirty) { this.mesh.instanceMatrix.needsUpdate = true; this.meshLo.instanceMatrix.needsUpdate = true; }
+  }
+
+  /**
+   * Per physics step, before world.step():
+   *  - a righting torque (spring + damper) on shelves tilted less than TIP_ANGLE, so normal
+   *    bumps make them wobble and settle instead of starting a store-wide collapse;
+   *  - wakes the stock of any shelf that has moved, so nothing is left asleep in mid-air
+   *    when the boards under it rock or fall away.
+   */
+  stabilize(dt: number) {
+    for (const sh of this.shelves) {
+      const b = sh.body;
+      if (b.isSleeping()) continue;
+      const r = b.rotation(), t = b.translation();
+      _q.set(r.x, r.y, r.z, r.w);
+      _up.set(0, 1, 0).applyQuaternion(_q);
+      const tilt = Math.acos(Math.min(1, _up.y));
+      sh.tilt = tilt;
+      // wake the stock when the shelf has moved since we last did (not merely because it's
+      // awake: a shelf resting at a slight lean would otherwise keep its whole stock awake forever)
+      const w0 = sh.wokeAt;
+      if (Math.hypot(t.x - w0.x, t.z - w0.z) > 0.015 || Math.abs(t.y - w0.y) > 0.015 || Math.abs(tilt - w0.tilt) > 0.012) {
+        w0.x = t.x; w0.y = t.y; w0.z = t.z; w0.tilt = tilt;
+        for (const it of sh.stock) if (it.alive && it.body.isSleeping()) it.body.wakeUp();
+      }
+      if (sh.toppled) continue;
+      if (tilt > TIP_ANGLE) { sh.toppled = true; continue; }
+      // axis that rotates `up` back toward +Y is up × Y = (-up.z, 0, up.x)
+      const ax = -_up.z, az = _up.x, al = Math.hypot(ax, az);
+      const w = b.angvel();
+      if (tilt < 0.006 && Math.abs(w.x) + Math.abs(w.z) < 0.03) continue; // settled: let it sleep
+      const I = b.mass() * (this.store.shelfHeight ** 2) / 3;
+      const k = ShelfSystem.K, c = ShelfSystem.C;
+      const s0 = al > 1e-6 ? (k * tilt) / al : 0;
+      b.applyTorqueImpulse({ x: (ax * s0 - c * w.x) * I * dt, y: 0, z: (az * s0 - c * w.z) * I * dt }, false);
+    }
   }
 
   awakeCount() { let n = 0; for (const s of this.shelves) if (!s.body.isSleeping()) n++; return n; }

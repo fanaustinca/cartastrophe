@@ -115,6 +115,28 @@ export function signTexture(title: string, sub: string, bg: number, fg = 0xfffff
   return tex(c);
 }
 
+/** Big hanging aisle sign: header + a picture tile per product kind stocked there. */
+export function aisleSignTexture(title: string, items: { label: string; thumb: HTMLCanvasElement | null }[], bg: number): THREE.CanvasTexture {
+  const w = 768, h = 400;
+  const [c, g] = canvas(w, h);
+  g.fillStyle = hex(bg); g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 0, w, 96);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '900 72px Arial Black, Impact, sans-serif';
+  g.fillText(title, w / 2, 52, w - 40);
+  const n = Math.max(1, items.length), tw = (w - 24) / n;
+  items.forEach((it, i) => {
+    const x = 12 + i * tw;
+    g.fillStyle = '#ffffff'; g.beginPath(); g.roundRect(x + 8, 110, tw - 16, 278, 18); g.fill();
+    const s = Math.min(tw - 40, 200);
+    if (it.thumb) g.drawImage(it.thumb, x + tw / 2 - s / 2, 118, s, s);
+    g.fillStyle = '#111'; g.font = `900 ${n > 2 ? 30 : 36}px Arial Black, Arial, sans-serif`;
+    g.fillText(it.label.toUpperCase(), x + tw / 2, 352, tw - 30);
+  });
+  g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 8; g.strokeRect(4, 4, w - 8, h - 8);
+  return tex(c);
+}
+
 export function nameTagTexture(name: string, color: number): THREE.CanvasTexture {
   const [c, g] = canvas(256, 64);
   g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.roundRect(4, 8, 248, 48, 16); g.fill();

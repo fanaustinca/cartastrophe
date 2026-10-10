@@ -124,7 +124,6 @@ export class CartModel {
   custom!: Customization;
   wheelDef!: WheelDef;
   private wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
-  private cargoMat = itemMaterial();
 
   constructor(custom: Customization, opts: { avatarColor?: number; name?: string; local?: boolean; envMap?: THREE.Texture | null }) {
     this.skinMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 1, roughness: 0.3, envMap: opts.envMap ?? null });
@@ -243,14 +242,13 @@ export class CartModel {
     this.cargo.clear();
     kinds.slice(-10).forEach((id, i) => {
       const k = KIND_BY_ID[id]; if (!k) return;
-      const m = new THREE.Mesh(itemGeometry(k, false), this.cargoMat);
+      const m = new THREE.InstancedMesh(itemGeometry(k, true), itemMaterial(k), 1);
+      m.setMatrixAt(0, new THREE.Matrix4());
+      m.setColorAt(0, new THREE.Color(k.colors[0]));
       const scale = Math.min(1, 0.32 / Math.max(...k.size));
       m.scale.setScalar(scale);
       m.position.set(((i % 3) - 1) * 0.15, k.size[1] * scale / 2 + Math.floor(i / 6) * 0.12, (Math.floor(i / 3) % 2 - 0.5) * 0.3);
       m.rotation.y = i * 1.3;
-      // per-mesh color via a cloned material is cheap here (≤10 cargo items per cart)
-      const mat = this.cargoMat.clone(); mat.color.setHex(k.colors[0]);
-      m.material = mat;
       this.cargo.add(m);
     });
   }
@@ -301,6 +299,10 @@ export class Cart {
   fwdSpeed = 0;
   latSpeed = 0;
   riding = false;
+  /** Speed at the start of the last step, i.e. before any impact in that step. */
+  preSpeed = 0;
+  preVx = 0;
+  preVz = 0;
   kinematic: boolean;
   onImpact: ((force: number, other: number) => void) | null = null;
   private wheel: WheelDef;
@@ -347,6 +349,7 @@ export class Cart {
     const yaw = this.yaw;
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
     const rx = -fz, rz = fx; // driver's right
+    this.preSpeed = Math.hypot(v.x, v.z); this.preVx = v.x; this.preVz = v.z;
     let vF = v.x * fx + v.z * fz;
     let vL = v.x * rx + v.z * rz;
     const grounded = t.y < 0.25;

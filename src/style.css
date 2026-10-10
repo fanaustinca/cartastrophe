@@ -66,8 +66,13 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 #h-store { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); font-size: 0.8rem; color: var(--muted); }
 #h-list { position: absolute; top: 12px; right: 12px; background: var(--panel); border-radius: 12px; padding: 10px 14px; min-width: 210px; font-size: 0.95rem; }
 #h-list .t { color: var(--yellow); font-size: 0.75rem; letter-spacing: 2px; margin-bottom: 4px; }
-#h-list div.it { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
-#h-list div.it.got { opacity: 0.45; text-decoration: line-through; }
+#h-list div.it { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+#h-list div.it img, #h-list div.it .em { width: 38px; height: 38px; flex: none; background: rgba(255, 255, 255, 0.9); border-radius: 8px; font-size: 1.6rem; text-align: center; line-height: 38px; }
+#h-list div.it .nm { display: flex; flex-direction: column; line-height: 1.1; flex: 1; }
+#h-list div.it .nm i { font-style: normal; font-weight: 600; font-size: 0.72rem; color: var(--yellow); }
+#h-list div.it .q { margin-left: 8px; }
+#h-list div.it.got { opacity: 0.45; }
+#h-list div.it.got b { text-decoration: line-through; }
 #h-list div.go { color: var(--yellow); margin-top: 6px; animation: pulse 0.8s infinite alternate; }
 @keyframes pulse { to { opacity: 0.4; } }
 #h-standings { position: absolute; top: 12px; left: 12px; background: var(--panel); border-radius: 12px; padding: 8px 12px; font-size: 0.85rem; min-width: 190px; }
@@ -83,7 +88,14 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 .bar { height: 8px; background: rgba(255, 255, 255, 0.12); border-radius: 4px; overflow: hidden; margin-top: 6px; }
 #h-stamina { height: 100%; background: linear-gradient(90deg, #3ad07a, #b0ff5a); width: 100%; }
 #h-surface { font-size: 0.8rem; color: #ffb07a; min-height: 1em; margin-top: 4px; }
-#h-map { position: absolute; right: 12px; bottom: 12px; border-radius: 12px; background: var(--panel); }
+#h-map { position: absolute; right: 12px; bottom: 12px; border-radius: 14px; }
+#h-guide { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; background: var(--panel); padding: 4px 14px 4px 8px; border-radius: 22px; font-size: 0.95rem; white-space: nowrap; }
+#h-guide .ar { display: inline-block; color: var(--yellow); font-size: 1.4rem; line-height: 1; }
+#h-guide img { width: 32px; height: 32px; background: rgba(255, 255, 255, 0.9); border-radius: 6px; }
+#h-guide small { color: var(--muted); }
+#h-bigwrap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88vw, 900px); height: min(78vh, 700px); background: rgba(10, 12, 20, 0.9); border-radius: 16px; padding: 10px; display: flex; flex-direction: column; }
+#h-bigwrap .t { color: var(--yellow); letter-spacing: 2px; font-size: 0.8rem; margin-bottom: 6px; }
+#h-bigmap { flex: 1; width: 100%; min-height: 0; }
 #h-fps { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); font: 600 0.7rem monospace; color: var(--muted); }
 
 #r-table { border-collapse: collapse; min-width: min(560px, 100%); background: var(--panel); border-radius: 12px; overflow: hidden; }
@@ -92,7 +104,12 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 
 @media (max-width: 720px) {
   #h-standings { display: none; }
-  #h-map { width: 150px; height: 122px; }
+  #h-map { width: 150px; height: 150px; }
+  #h-guide { top: 64px; font-size: 0.8rem; }
   #h-list { min-width: 160px; font-size: 0.8rem; }
   #h-timer { font-size: 1.6rem; }
 }
+
+#dev { position: fixed; left: 0; right: 0; top: 0; z-index: 60; background: rgba(5, 6, 10, 0.92); border-bottom: 2px solid var(--yellow); font: 600 0.85rem monospace; padding: 8px 12px; }
+#dev-out { max-height: 30vh; overflow-y: auto; white-space: pre-wrap; color: #b8ffb0; margin-bottom: 6px; }
+#dev-in { width: 100%; font-family: monospace; }

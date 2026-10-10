@@ -26,7 +26,7 @@
     <div id="store-pick" class="stores"></div>
     <div class="wallet">🎟 <b id="coupons">0</b> coupons</div>
     <div id="title-err" class="err"></div>
-    <div class="help">WASD / arrows drive · Shift sprint · Space hop on &amp; ride (drift) · C camera · R reset · Esc pause</div>
+    <div class="help">WASD / arrows drive · Shift sprint · Space hop on &amp; ride (drift) · C camera · M store map · R reset · Esc pause · ` dev console</div>
   </div>
 
   <div id="lobby" class="screen">
@@ -67,9 +67,13 @@
       <div class="bar"><div id="h-stamina"></div></div>
       <div id="h-surface"></div>
     </div>
-    <canvas id="h-map" width="220" height="180"></canvas>
+    <div id="h-guide" class="hidden"></div>
+    <canvas id="h-map" width="230" height="230"></canvas>
+    <div id="h-bigwrap" class="hidden"><div class="t">STORE MAP <small>(M to close)</small></div><canvas id="h-bigmap"></canvas></div>
     <div id="h-fps"></div>
   </div>
+
+  <div id="dev" class="hidden"><div id="dev-out"></div><input id="dev-in" placeholder="dev command — type help" autocomplete="off" spellcheck="false" /></div>
 
   <div id="pause" class="screen">
     <h2>Paused</h2>

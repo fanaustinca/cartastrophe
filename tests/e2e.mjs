@@ -110,6 +110,51 @@ await T('ramming a shelf makes it tip and dumps its stock on the floor', async (
   assert(after.awake < 120, `items never settled back to sleep: ${after.awake} awake`);
 });
 
+await T('shelves are sturdy: a jogging bump only rocks one, a sprint ram topples it without a domino', async () => {
+  const run = (sp) => E((sp) => {
+    const w = CART.game.world, sh = w.shelves.shelves[Math.floor(w.shelves.shelves.length / 2)], p = sh.body.translation();
+    CART.teleport(p.x - 1.75, p.z, Math.PI / 2);
+    CART.game.local.cart.body.setLinvel({ x: sp, y: 0, z: 0 }, true);
+    CART.setInput({ throttle: 1, sprint: sp > 7 });
+    let mx = 0;
+    for (let i = 0; i < 240; i++) { if (i === 30) CART.setInput({ throttle: -1 }); if (i === 60) CART.setInput(null); CART.advance(1 / 60); mx = Math.max(mx, sh.tilt); }
+    return { mx, toppled: w.shelves.shelves.filter((s) => s.toppled).length, tilted: w.shelves.shelves.filter((s) => s.tilt > 0.2).length };
+  }, sp);
+  await solo('bullseye', 5, 0);
+  const jog = await run(6.4);
+  assert(jog.toppled === 0 && jog.mx < 0.3, `jogging bump toppled a shelf: ${JSON.stringify(jog)}`);
+  await solo('bullseye', 5, 0);
+  const ram = await run(9.4);
+  assert(ram.toppled === 1, `sprint ram should topple exactly the shelf hit: ${JSON.stringify(ram)}`);
+  assert(ram.tilted <= 1, `neighbouring shelves went over too (domino): ${JSON.stringify(ram)}`);
+});
+
+await T('nothing is left hovering: stock falls when its shelf tips or the item under it is taken', async () => {
+  await solo('costplenty', 5, 7);
+  // sprint into a few shelves, let the bots shop a while, and grab items out of pallet stacks
+  for (const k of [0.3, 0.5, 0.7]) {
+    await E((k) => {
+      const w = CART.game.world, sh = w.shelves.shelves[Math.floor(w.shelves.shelves.length * k)], p = sh.body.translation();
+      CART.teleport(p.x - 1.75, p.z, Math.PI / 2);
+      CART.game.local.cart.body.setLinvel({ x: 10, y: 0, z: 0 }, true);
+      CART.setInput({ throttle: 1, sprint: true }); CART.advance(0.8); CART.setInput(null);
+    }, k);
+  }
+  await E(() => {
+    const g = CART.game;
+    for (const it of g.world.items.all.filter((i) => i.shelf === -5 && i.alive).slice(0, 12)) if (it.home.y < 0.5) g.world.items.remove(it); // bottom layer of pallets
+    CART.advance(20);
+  });
+  const r = await E(() => {
+    const g = CART.game, ys = [];
+    for (const it of g.world.items.all) if (it.alive && it.body.isSleeping() && it.body.translation().y > 0.25) { ys.push([it, it.body.translation().y]); it.body.wakeUp(); }
+    CART.advance(1.5);
+    const fell = ys.filter(([it, y]) => it.alive && it.kind.shape !== 'sphere' && y - it.body.translation().y > 0.1);
+    return { checked: ys.length, fell: fell.length, ex: fell.slice(0, 4).map(([it, y]) => `${it.kind.id}@${y.toFixed(2)} sh${it.shelf} home${it.home.y.toFixed(2)} d${Math.hypot(it.home.x - it.body.translation().x, it.home.z - it.body.translation().z).toFixed(2)}${it.shelf >= 0 ? " tilt" + g.world.shelves.shelves[it.shelf].tilt.toFixed(2) : ""}`) };
+  });
+  assert(r.fell === 0, `${r.fell} items were asleep in mid-air: ${r.ex.join(', ')}`);
+});
+
 await T('eggs crack on impact and leave a slippery yolk puddle', async () => {
   await solo('wholefarm', 11, 0);
   const egg = await E(() => {
@@ -273,6 +318,67 @@ await T('distance LOD: only nearby items use the hi-poly mesh', async () => {
   assert(r.hi > 0 && r.hi < r.total * 0.3, `hi ${r.hi} of ${r.total}`);
 });
 
+console.log('\nItems & wayfinding');
+await T('products have printed labels and recognisable thumbnails', async () => {
+  await solo('costplenty', 9, 0);
+  const r = await E(() => {
+    const labelled = CART.game.world.items.batches.filter((b) => b.hi.material.map).map((b) => b.kind.id);
+    const thumbs = CART.thumbs();
+    // a thumbnail is a real picture: lots of opaque, varied pixels
+    const img = new Image(); img.src = thumbs.find(([id]) => id === 'tp')[1];
+    return new Promise((res) => { img.onload = () => {
+      const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.drawImage(img, 0, 0, 64, 64);
+      const d = g.getImageData(0, 0, 64, 64).data; let op = 0; const cols = new Set();
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { op++; cols.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4); }
+      res({ labelled, n: thumbs.length, op, cols: cols.size });
+    }; });
+  });
+  assert(r.labelled.includes('tp') && r.labelled.includes('cereal') && r.labelled.length >= 10, `labelled kinds: ${r.labelled}`);
+  assert(r.n === 22 && r.op > 600 && r.cols > 25, `toilet paper thumbnail looks empty: ${JSON.stringify(r)}`);
+  const sh = await E(() => { const w = CART.game.world, it = w.items.all.find((i) => i.kind.id === 'tp' && i.shelf >= 0); const p = it.body.translation(); return [p.x, p.y, p.z]; });
+  await E(([x, y, z]) => CART.view([x - 1.6, y + 0.4, z + 0.5, x, y, z]), sh);
+  await shot(page, '08-labels-tp.png');
+  await E(() => CART.view(null));
+});
+
+await T('wayfinding: list shows pictures + aisle, overhead badges, guide arrow, minimap and store map', async () => {
+  await solo('safely', 7, 7);
+  await E(() => CART.render());
+  const r = await E(() => {
+    const g = CART.game;
+    const rows = [...document.querySelectorAll('#h-list .it')];
+    return {
+      list: g.cfg.list.length, rows: rows.length, imgs: document.querySelectorAll('#h-list .it img').length,
+      where: rows.map((r) => r.querySelector('i').textContent),
+      badges: g.guides.sprites.filter((s) => s.visible).length,
+      clusters: g.guides.clusters.length,
+      guide: !document.getElementById('h-guide').classList.contains('hidden') && document.getElementById('h-guide').textContent,
+      aisles: g.world.aisleZones.length,
+    };
+  });
+  assert(r.rows === r.list && r.imgs === r.list, `list rows/images ${r.rows}/${r.imgs} for ${r.list} items`);
+  assert(r.where.every((w) => w && w !== 'all gone?'), `missing locations: ${r.where}`);
+  assert(r.where.some((w) => /^Aisle \d+$/.test(w)), `no aisle hints: ${r.where}`);
+  assert(r.badges >= Math.min(4, r.clusters) && r.badges > 0, `badges ${r.badges} / clusters ${r.clusters}`);
+  assert(r.guide && /\d+ m/.test(r.guide), `guide arrow: ${r.guide}`);
+  await shot(page, '09-wayfinding.png');
+  // the needed items' badge sits above where those items actually are
+  const ok = await E(() => {
+    const g = CART.game, c = g.guides.clusters[0];
+    const near = g.world.items.near(c.x, c.z, 3.5, [], (it) => it.kind.id === c.kind && it.alive);
+    return near.length;
+  });
+  assert(ok > 0, 'badge is not over any matching item');
+  await page.keyboard.press('KeyM');
+  await E(() => CART.render());
+  assert(await E(() => !document.getElementById('h-bigwrap').classList.contains('hidden')), 'store map did not open');
+  await shot(page, '10-store-map.png');
+  await page.keyboard.press('KeyM');
+  // ticking off the list switches the guides to the checkouts
+  await E(() => { CART.dev('win'); CART.game.guides.refresh(); CART.advance(0.5); CART.render(); });
+  assert(await E(() => CART.game.guides.checkout && document.getElementById('h-guide').textContent.includes('CHECKOUT')), 'guide did not switch to checkout');
+});
+
 console.log('\nShop');
 await T('garage: buying and equipping wheels persists across reloads', async () => {
   await page.goto(BASE + '?test&fresh', { waitUntil: 'domcontentloaded' });
@@ -294,6 +400,30 @@ await T('garage: buying and equipping wheels persists across reloads', async () 
   assert(p2.custom.wheel === 'rubber' && p2.coupons === coupons - 150, 'purchase not persisted');
 });
 
+await T('dev console: ` opens it, coupons / unlock / tp / win commands work', async () => {
+  await page.goto(BASE + '?test&fresh', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.CART && CART.ready);
+  const c0 = await E(() => CART.profile.coupons);
+  await page.keyboard.press('Backquote');
+  assert(await E(() => !document.getElementById('dev').classList.contains('hidden') && document.activeElement.id === 'dev-in'), 'console did not open/focus');
+  await page.keyboard.type('coupons 5000');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('unlock');
+  await page.keyboard.press('Enter');
+  const p = await E(() => ({ c: CART.profile.coupons, owned: CART.profile.owned.length, out: document.getElementById('dev-out').textContent, shown: document.getElementById('coupons').textContent }));
+  assert(p.c === c0 + 5000 && p.shown === String(c0 + 5000), `coupons ${p.c} shown ${p.shown}`);
+  assert(p.owned >= 22, `owned ${p.owned}: ${p.out}`);
+  await page.keyboard.press('Backquote');
+  assert(await E(() => document.getElementById('dev').classList.contains('hidden')), 'console did not close');
+  await solo('bullseye', 3, 0);
+  const t = await E(() => { const k = CART.game.cfg.list[0].kind; const m = CART.dev('tp ' + k); const s = CART.state(); return { m, near: CART.game.world.items.near(s.x, s.z, 4, [], (i) => i.alive && i.kind.id === k).length }; });
+  assert(t.near > 0, `tp didn't land near the item: ${JSON.stringify(t)}`);
+  await E(() => { CART.dev('finish'); CART.advance(0.2); });
+  assert(await E(() => CART.game.local.done), 'finish command did not check out');
+  let bad = ''; try { await E(() => CART.dev('nonsense')); } catch (e) { bad = e.message; }
+  assert(/unknown command/.test(bad), 'unknown command not reported: ' + bad);
+});
+
 console.log('\nMultiplayer (P2P protocol over BroadcastChannel)');
 async function mpTest(query, maxErr) {
   const small = { width: 640, height: 360 };
@@ -310,8 +440,8 @@ async function mpTest(query, maxErr) {
   await H(() => CART.startLobby());
   await host.page.waitForFunction(() => CART.game && CART.game.phase === 'race', { timeout: 60000, polling: 100 });
   await client.page.waitForFunction(() => CART.game && CART.game.phase === 'race', { timeout: 60000, polling: 100 });
-  const same = await Promise.all([H(() => CART.game.world.items.all.length), C(() => CART.game.world.items.all.length), H(() => JSON.stringify(CART.game.cfg.list)), C(() => JSON.stringify(CART.game.cfg.list))]);
-  assert(same[0] === same[1] && same[2] === same[3], 'peers built different stores/lists');
+  const same = await Promise.all([H(() => CART.game.world.items.all.filter((i) => !i.spawned).length), C(() => CART.game.world.items.all.filter((i) => !i.spawned).length), H(() => JSON.stringify(CART.game.cfg.list)), C(() => JSON.stringify(CART.game.cfg.list))]);
+  assert(same[0] === same[1] && same[2] === same[3], 'peers built different stores/lists: ' + JSON.stringify(same));
   // client drives; host watches the remote cart
   await C(() => CART.setInput({ throttle: 1, sprint: true }));
   const samples = [];
@@ -319,18 +449,27 @@ async function mpTest(query, maxErr) {
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 100));
     const [h, c] = await Promise.all([H(() => CART.remote(1)), C(() => CART.state())]);
-    samples.push({ hx: h.x, hz: h.z, cx: c.x, cz: c.z, ex: h.extrapolating, n: h.buffered, t: performance.now() / 1000 });
+    samples.push({ hx: h.x, hz: h.z, cx: c.x, cz: c.z, ex: h.extrapolating, n: h.buffered, t: h.simT });
     if (i >= 20 && Math.hypot(c.x - samples[0].cx, c.z - samples[0].cz) > 8) break;
   }
-  await C(() => CART.setInput(null));
   const moved = Math.hypot(samples.at(-1).cx - samples[0].cx, samples.at(-1).cz - samples[0].cz);
   assert(moved > 3, `client only moved ${moved.toFixed(2)}m`);
-  const err = Math.hypot(samples.at(-1).hx - samples.at(-1).cx, samples.at(-1).hz - samples.at(-1).cz);
-  assert(err < maxErr, `host sees client ${err.toFixed(2)}m away from truth`);
+  // in motion the host shows the cart ~(render delay + latency) behind; that lag is by design
+  const lagErr = Math.hypot(samples.at(-1).hx - samples.at(-1).cx, samples.at(-1).hz - samples.at(-1).cz);
+  assert(lagErr < maxErr * 1.6, `host sees moving client ${lagErr.toFixed(2)}m away from truth`);
+  // once the client stops, the host's view must converge onto the true position
+  await C(() => CART.setInput({ throttle: -1 }));
+  await new Promise((r) => setTimeout(r, 1500));
+  await C(() => CART.setInput(null));
+  await new Promise((r) => setTimeout(r, 1200));
+  const [hs, cs] = await Promise.all([H(() => CART.remote(1)), C(() => CART.state())]);
+  const err = Math.hypot(hs.x - cs.x, hs.z - cs.z);
+  assert(err < 0.35, `stopped client: host still sees it ${err.toFixed(2)}m off (speed ${cs.speed.toFixed(2)})`);
   // rubber-banding check: the host's view must never jump backwards or teleport
   let maxJump = 0, backwards = 0;
   for (let i = 1; i < samples.length; i++) {
-    // a jump is "teleporting" if it beats a boosted cart's top speed (16 m/s) over the real gap
+    // a jump is "teleporting" if it beats a boosted cart's top speed (16 m/s) over the host's own
+    // simulated time between the samples (wall time would count a stalled host frame as a jump)
     const d = Math.hypot(samples[i].hx - samples[i - 1].hx, samples[i].hz - samples[i - 1].hz);
     maxJump = Math.max(maxJump, d - 16 * (samples[i].t - samples[i - 1].t));
     const dir = Math.sign(samples.at(-1).hz - samples[0].hz);
@@ -351,7 +490,7 @@ async function mpTest(query, maxErr) {
   await host.page.screenshot({ path: 'tests/screenshots/07-mp-host' + (query ? '-lag' : '') + '.png' });
   await client.page.screenshot({ path: 'tests/screenshots/07-mp-client' + (query ? '-lag' : '') + '.png' });
   assert(host.errors.length === 0 && client.errors.length === 0, 'console errors: ' + [...host.errors, ...client.errors].join('\n'));
-  console.log(`      sync error ${err.toFixed(2)}m · worst over-speed step ${maxJump.toFixed(2)}m · rtt ${(await C(() => CART.lobby().rtt * 1000)).toFixed(1)}ms`);
+  console.log(`      in-motion offset ${lagErr.toFixed(2)}m · settled error ${err.toFixed(2)}m · worst over-speed step ${maxJump.toFixed(2)}m · rtt ${(await C(() => CART.lobby().rtt * 1000)).toFixed(1)}ms`);
   await host.page.close(); await client.page.close();
 }
 
