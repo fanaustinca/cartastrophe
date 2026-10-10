@@ -140,6 +140,18 @@ await T('eggs crack on impact and leave a slippery yolk puddle', async () => {
   await E(() => CART.view(null));
 });
 
+await T('all five mess types render as visible puddles (pixel diff)', async () => {
+  await solo('safely', 1, 0);
+  const view = await E(() => { const s = CART.state(); const v = [s.x, 4, s.z + 1, s.x, 0, s.z - 4]; CART.view(v); return s; });
+  const before = await E(() => CART.pixelStats());
+  await E((s) => ['egg', 'oil', 'milk', 'soda', 'mayo'].forEach((t, i) => CART.spawnSlick(t, s.x - 4 + i * 2, s.z - 4, 0.9)), view);
+  const after = await E(() => CART.pixelStats());
+  await shot(page, '03-puddles.png');
+  await E(() => CART.view(null));
+  const diff = Math.abs(after.mean - before.mean) + Math.abs(after.std - before.std) + Math.abs(after.colors - before.colors) / 20;
+  assert(diff > 3, `puddles barely changed the frame: ${JSON.stringify({ before, after })}`);
+});
+
 await T('oil slicks kill lateral grip and spin the cart out', async () => {
   await solo('safely', 21, 0);
   const lane = await E(() => { const w = CART.game.world; return { x: w.aisleXs[2], z: (w.runs[0][0] + w.runs[0][1]) / 2 }; });
@@ -284,8 +296,9 @@ await T('garage: buying and equipping wheels persists across reloads', async () 
 
 console.log('\nMultiplayer (P2P protocol over BroadcastChannel)');
 async function mpTest(query, maxErr) {
-  const host = await openPage(browser, BASE + '?test&fresh&net=local' + query);
-  const client = await openPage(browser, BASE + '?test&fresh&net=local' + query);
+  const small = { width: 640, height: 360 };
+  const host = await openPage(browser, BASE + '?test&fresh&net=local' + query, small);
+  const client = await openPage(browser, BASE + '?test&fresh&net=local' + query, small);
   const H = (fn, a) => host.page.evaluate(fn, a), C = (fn, a) => client.page.evaluate(fn, a);
   await H(() => CART.setName('HostHank'));
   await C(() => CART.setName('ClientCleo'));
@@ -306,7 +319,7 @@ async function mpTest(query, maxErr) {
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 100));
     const [h, c] = await Promise.all([H(() => CART.remote(1)), C(() => CART.state())]);
-    samples.push({ hx: h.x, hz: h.z, cx: c.x, cz: c.z, ex: h.extrapolating, n: h.buffered });
+    samples.push({ hx: h.x, hz: h.z, cx: c.x, cz: c.z, ex: h.extrapolating, n: h.buffered, t: performance.now() / 1000 });
     if (i >= 20 && Math.hypot(c.x - samples[0].cx, c.z - samples[0].cz) > 8) break;
   }
   await C(() => CART.setInput(null));
@@ -317,13 +330,14 @@ async function mpTest(query, maxErr) {
   // rubber-banding check: the host's view must never jump backwards or teleport
   let maxJump = 0, backwards = 0;
   for (let i = 1; i < samples.length; i++) {
+    // a jump is "teleporting" if it beats a boosted cart's top speed (16 m/s) over the real gap
     const d = Math.hypot(samples[i].hx - samples[i - 1].hx, samples[i].hz - samples[i - 1].hz);
-    maxJump = Math.max(maxJump, d);
+    maxJump = Math.max(maxJump, d - 16 * (samples[i].t - samples[i - 1].t));
     const dir = Math.sign(samples.at(-1).hz - samples[0].hz);
     if ((samples[i].hz - samples[i - 1].hz) * dir < -0.05) { backwards++; console.log('      backwards at', i, JSON.stringify(samples.slice(Math.max(0, i - 3), i + 2).map((q) => [q.hz.toFixed(2), q.cz.toFixed(2), q.ex, q.n]))); }
   }
   assert(backwards === 0, `remote cart moved backwards ${backwards}x (rubber-banding)`);
-  assert(maxJump < 2.5, `remote cart jumped ${maxJump.toFixed(2)}m between samples`);
+  assert(maxJump < 0.5, `remote cart teleported ${maxJump.toFixed(2)}m beyond max speed between samples`);
   // shared pickups: an item collected on the client vanishes on the host
   const id = await C(() => {
     const g = CART.game, need = new Set(g.cfg.list.map((e) => e.kind));
@@ -337,7 +351,7 @@ async function mpTest(query, maxErr) {
   await host.page.screenshot({ path: 'tests/screenshots/07-mp-host' + (query ? '-lag' : '') + '.png' });
   await client.page.screenshot({ path: 'tests/screenshots/07-mp-client' + (query ? '-lag' : '') + '.png' });
   assert(host.errors.length === 0 && client.errors.length === 0, 'console errors: ' + [...host.errors, ...client.errors].join('\n'));
-  console.log(`      sync error ${err.toFixed(2)}m · max step ${maxJump.toFixed(2)}m · rtt ${(await C(() => CART.lobby().rtt * 1000)).toFixed(1)}ms`);
+  console.log(`      sync error ${err.toFixed(2)}m · worst over-speed step ${maxJump.toFixed(2)}m · rtt ${(await C(() => CART.lobby().rtt * 1000)).toFixed(1)}ms`);
   await host.page.close(); await client.page.close();
 }
 
