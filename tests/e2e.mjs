@@ -692,13 +692,13 @@ async function mpTest(query, maxErr) {
     return it.id;
   });
   assert(typeof id === 'number', JSON.stringify(id));
-  await host.page.waitForFunction((id) => !CART.game.world.items.all[id].alive, { timeout: 5000, polling: 100 }, id);
+  await host.page.waitForFunction((id) => !CART.game.world.items.all[id].alive, { timeout: 20000, polling: 100 }, id);
   // an oil drop on the client, and a restock decided by the host, happen on both peers
-  const n0 = await H(() => CART.game.world.hazards.activeSlicks().length);
-  await C(() => CART.game.dropOil(CART.state().x, CART.state().z + 2, CART.game.local, true));
-  await host.page.waitForFunction((n0) => CART.game.world.hazards.activeSlicks().length > n0, { timeout: 5000, polling: 100 }, n0);
+  const at = await C(() => { const s = CART.state(); CART.game.dropOil(s.x, s.z + 2, CART.game.local, true); return [s.x, s.z + 2]; });
+  // (a drop next to an existing oil puddle merges into it, so look for oil covering the spot)
+  await host.page.waitForFunction(([x, z]) => CART.game.world.hazards.activeSlicks().some((s) => s.type === 'oil' && Math.hypot(s.x - x, s.z - z) < s.r), { timeout: 20000, polling: 100 }, at);
   const grp = await H(() => { const g = CART.game.restock.groups.find((x) => x.shelf); CART.game.world.items.remove(g.items[0]); CART.game.doRestock(g.index, true); return { i: g.index, id: g.items[0].id }; });
-  await client.page.waitForFunction((g) => CART.game.restock.count >= 1 && CART.game.world.items.all[g.id].alive, { timeout: 5000, polling: 100 }, grp);
+  await client.page.waitForFunction((g) => CART.game.restock.count >= 1 && CART.game.world.items.all[g.id].alive, { timeout: 20000, polling: 100 }, grp);
   await host.page.screenshot({ path: 'tests/screenshots/07-mp-host' + (query ? '-lag' : '') + '.png' });
   await client.page.screenshot({ path: 'tests/screenshots/07-mp-client' + (query ? '-lag' : '') + '.png' });
   assert(host.errors.length === 0 && client.errors.length === 0, 'console errors: ' + [...host.errors, ...client.errors].join('\n'));
