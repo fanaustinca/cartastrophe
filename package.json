@@ -1,0 +1,26 @@
+{
+  "name": "cartastrophe",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cartastrophe: 8-player P2P shopping-cart racing through destructible parody grocery stores",
+  "scripts": {
+    "dev": "vite --port 8932 --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 8933",
+    "test": "npm run build && node tests/e2e.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "sim": "node tests/race.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "peerjs": "^1.5.5",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "puppeteer": "^25.13.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
