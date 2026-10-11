@@ -1,3 +1,4 @@
+import { PA_DEFAULT, type PaHost } from './fun';
 // All sound is synthesized with WebAudio: wheel rumble, customizable squeaks, crashes,
 // egg splats, boosts, pickups, countdown. No audio files.
 export class Sfx {
@@ -89,10 +90,39 @@ export class Sfx {
     }
   }
 
-  /** Store PA "ding-dong" before an announcement. */
-  chime() { this.hold('triangle', 659, 659, 0.42, 0.11); this.hold('triangle', 523, 523, 0.6, 0.11, 0.38); }
+  /** Store PA jingle before an announcement (each store's announcer has their own). */
+  chime() {
+    const h = this.hold.bind(this);
+    switch (this.host.chime) {
+      case 'warehouse': h('square', 196, 196, 0.32, 0.05, 0, 0, 6, 900); h('square', 147, 147, 0.5, 0.05, 0.34, 0, 6, 900); return; // bored two-tone buzz
+      case 'sparkle': [784, 988, 1175, 1568].forEach((f, i) => h('sine', f, f, 0.3, 0.09, i * 0.09)); return; // bright rising arpeggio
+      case 'windchime': [1047, 1319, 1175, 1568, 1397].forEach((f, i) => h('sine', f, f, 0.9, 0.05, i * 0.13 + Math.random() * 0.04)); return; // tinkly, unhurried
+      case 'modem': [880, 1320, 660, 1760, 990, 1500].forEach((f, i) => h('square', f, f * 1.03, 0.07, 0.035, i * 0.075, 0, 6, 3200)); return; // bleep bloop
+      default: h('triangle', 659, 659, 0.42, 0.11); h('triangle', 523, 523, 0.6, 0.11, 0.38); // classic ding-dong
+    }
+  }
 
-  /** Read an announcement aloud in the flattest store-PA voice the browser has. */
+  /** Which store's announcer is on the PA (voice, pitch, rate, chime). */
+  setHost(h: PaHost) { this.host = h; this.paVoice = undefined; }
+  private host: PaHost = PA_DEFAULT;
+  private paVoice: SpeechSynthesisVoice | null | undefined;
+  /** Best installed voice for the current announcer: named voices first, then accent, then any English one. */
+  private pickVoice(): SpeechSynthesisVoice | null {
+    if (this.paVoice !== undefined) return this.paVoice;
+    const all = window.speechSynthesis.getVoices();
+    if (!all.length) return null; // still loading; try again next time
+    const en = all.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    const pool = en.length ? en : all;
+    const h = this.host;
+    let v: SpeechSynthesisVoice | undefined;
+    for (const n of h.voices) if ((v = pool.find((x) => x.name.toLowerCase().includes(n.toLowerCase())))) break;
+    if (!v) for (const l of h.langs) if ((v = pool.find((x) => x.lang.replace('_', '-').toLowerCase() === l.toLowerCase()))) break;
+    // otherwise spread the stores over whatever voices exist so they still sound different
+    if (!v) { let k = 0; for (const c of h.name) k = (k * 31 + c.charCodeAt(0)) >>> 0; v = pool[k % pool.length]; }
+    return (this.paVoice = v ?? null);
+  }
+
+  /** Read an announcement aloud in the current store announcer's voice. */
   speak(text: string) {
     if (!this.enabled || !this.voice) return;
     try {
@@ -100,7 +130,9 @@ export class Sfx {
       if (!s) return;
       s.cancel();
       const u = new SpeechSynthesisUtterance(text.replace(/[^\p{L}\p{N}\s.,!?'’:;-]/gu, ''));
-      u.rate = 1.04; u.pitch = 0.85; u.volume = Math.min(1, this.volume * 1.2);
+      const v = this.pickVoice();
+      if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = this.host.rate; u.pitch = this.host.pitch; u.volume = Math.min(1, this.volume * 1.2);
       setTimeout(() => s.speak(u), 900); // after the chime
     } catch { /* no speech synthesis */ }
   }

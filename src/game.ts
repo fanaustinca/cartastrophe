@@ -11,7 +11,7 @@ import { Rng } from './rng';
 import { Guides } from './guides';
 import { Restock } from './restock';
 import { Popups } from './popups';
-import { Announcer, Chaos, newChaos, addChaos, talk, money, PRICE, SHELF_PRICE, BUMP_PRICE, DROP_PRICE, type PaEvent, type TalkEvent } from './fun';
+import { Announcer, PA_HOSTS, PA_DEFAULT, Chaos, newChaos, addChaos, talk, money, PRICE, SHELF_PRICE, BUMP_PRICE, DROP_PRICE, type PaEvent, type TalkEvent } from './fun';
 import type { Item } from './items';
 import type { Shelf } from './shelves';
 import type { Sfx } from './audio';
@@ -152,6 +152,8 @@ export class Game {
     }
     this.world.items.onBreak = (it, f) => this.smash(it, f, true);
     this.announcer = new Announcer((text) => { this.pa = { text, t: 6.5 }; this.sfx.chime(); this.sfx.speak(text); });
+    this.announcer.store = def.id;
+    this.sfx.setHost(PA_HOSTS[def.id] ?? PA_DEFAULT);
     this.scene.add(this.popups.group);
     this.restock = new Restock(this.world);
 

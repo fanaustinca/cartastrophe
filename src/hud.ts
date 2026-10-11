@@ -1,5 +1,6 @@
 // HUD: timer, grocery list (with product pictures + where to find them), guide arrow, standings,
 // speed/stamina, messages, a heading-up minimap and a full store map (M). DOM updates are throttled.
+import { PA_HOSTS, PA_DEFAULT } from './fun';
 import type { Game } from './game';
 import { KIND_BY_ID, STORE_BY_ID, kindName } from './config';
 import { SHELF_LEN, SHELF_DEPTH } from './shelves';
@@ -97,6 +98,7 @@ export class Hud {
     if (g.pa && pa.dataset.t !== g.pa.text) {
       pa.dataset.t = g.pa.text;
       pa.querySelector('span')!.textContent = g.pa.text;
+      pa.querySelector('b')!.textContent = '📢 ' + (PA_HOSTS[g.world.def.id] ?? PA_DEFAULT).name;
       pa.classList.remove('hidden');
       pa.style.animation = 'none'; void pa.offsetWidth; pa.style.animation = '';
     } else if (!g.pa && pa.dataset.t) { pa.dataset.t = ''; pa.classList.add('hidden'); }

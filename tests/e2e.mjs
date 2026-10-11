@@ -654,9 +654,32 @@ await T('chaos: flattening a shelf books the damages, pops price tags, builds a 
   assert(r.best >= 2, 'falling stock should chain a combo: ' + JSON.stringify(r));
   assert(r.pa.length > 10 && r.paHud === r.pa, 'the PA did not announce the wreck: ' + JSON.stringify(r));
   assert(r.hud.includes('damages'), 'HUD chaos meter missing: ' + r.hud);
+  assert((await E(() => document.querySelector('#h-pa b').textContent)).includes('BRITTANY'), 'the PA banner should name the store announcer');
   await E(([x, z]) => CART.view([x - 5, 3, z + 4, x, 0.8, z]), [x, z]);
   await shot(page, '14-chaos.png');
   await E(() => CART.view(null));
+});
+
+await T('PA: every store has its own announcer, voice, chime and lines', async () => {
+  const r = await E(() => {
+    const H = CART.fun.PA_HOSTS, ids = ['costplenty', 'bullseye', 'wholefarm', 'bestbuyout', 'safely'];
+    const voices = new Set(ids.map((id) => `${H[id]?.pitch}/${H[id]?.rate}/${H[id]?.chime}`));
+    const own = ids.every((id) => CART.fun.STORE_PA[id]?.start?.length && CART.fun.STORE_PA[id]?.ambient?.length);
+    return { ids: ids.length, voices: voices.size, names: new Set(ids.map((id) => H[id]?.name)).size, own };
+  });
+  assert(r.voices === r.ids && r.names === r.ids && r.own, 'stores should each have a distinct announcer: ' + JSON.stringify(r));
+  await solo('bestbuyout', 1, 0);
+  const u = await E(() => {
+    const said = [];
+    const s = window.speechSynthesis;
+    if (s) { s.speak = (x) => said.push(x); }
+    CART.game.sfx.voice = true; CART.game.sfx.enabled = true;
+    CART.game.announcer.rand = () => 0;
+    CART.game.announcer.say('ambient', 999);
+    return new Promise((ok) => setTimeout(() => ok({ text: CART.game.pa?.text ?? '', own: CART.fun.STORE_PA.bestbuyout.ambient.includes(CART.game.pa?.text), banner: (CART.render(), document.querySelector('#h-pa b').textContent), said: said.map((x) => ({ pitch: x.pitch, rate: x.rate })), speech: !!s }), 1100));
+  });
+  assert(u.own && u.banner.includes('UNIT-7'), 'Best Buyout should use Unit-7 lines: ' + JSON.stringify(u));
+  if (u.speech && u.said.length) assert(Math.abs(u.said[0].pitch - 0.05) < 0.01 && Math.abs(u.said[0].rate - 1.22) < 0.01, 'robot voice settings not applied: ' + JSON.stringify(u.said));
 });
 
 await T('results: an itemised damage receipt, awards, daily challenges and a shopper rank', async () => {

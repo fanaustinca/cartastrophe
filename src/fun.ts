@@ -195,6 +195,74 @@ export const PA: Record<PaEvent, string[]> = {
     'Customer satisfaction is our number two priority.',
   ],
 };
+/** Each store has its own PA announcer: a name on the banner, a voice, a chime, and opinions. */
+export interface PaHost {
+  name: string;
+  /** speechSynthesis voice preferences: name fragments first, then language tags. */
+  voices: string[]; langs: string[];
+  pitch: number; rate: number;
+  chime: 'dingdong' | 'warehouse' | 'sparkle' | 'windchime' | 'modem';
+}
+export const PA_HOSTS: Record<string, PaHost> = {
+  costplenty: { name: 'GARY · WAREHOUSE FLOOR', voices: ['Alex', 'David', 'Guy', 'Christopher', 'Mark', 'Eric', 'US English'], langs: ['en-US'], pitch: 0.5, rate: 0.86, chime: 'warehouse' },
+  bullseye: { name: 'BRITTANY · GUEST EXPERIENCE', voices: ['Samantha', 'Zira', 'Aria', 'Jenny', 'Ava', 'Allison', 'Female'], langs: ['en-US', 'en-CA'], pitch: 1.5, rate: 1.16, chime: 'sparkle' },
+  wholefarm: { name: 'JUNIPER · MINDFULNESS LEAD', voices: ['Moira', 'Karen', 'Tessa', 'Libby', 'Sonia', 'Hazel', 'Natasha', 'UK English Female'], langs: ['en-IE', 'en-AU', 'en-GB', 'en-ZA'], pitch: 1.1, rate: 0.8, chime: 'windchime' },
+  bestbuyout: { name: 'UNIT-7 · GEEK SQUADRON', voices: ['Zarvox', 'Trinoids', 'Fred', 'Ralph', 'Junior', 'Robot'], langs: ['en-US'], pitch: 0.05, rate: 1.22, chime: 'modem' },
+  safely: { name: 'HAL · GROCERY GRANDPA', voices: ['Daniel', 'George', 'Arthur', 'Ryan', 'Rishi', 'Lee', 'UK English Male'], langs: ['en-GB', 'en-AU', 'en-IN'], pitch: 0.75, rate: 0.9, chime: 'dingdong' },
+};
+export const PA_DEFAULT: PaHost = { name: 'ATTENTION SHOPPERS', voices: [], langs: ['en-US'], pitch: 0.85, rate: 1.04, chime: 'dingdong' };
+
+/** Lines only that store's announcer says (mixed in with the general ones, favoured ~half the time). */
+export const STORE_PA: Record<string, Partial<Record<PaEvent, string[]>>> = {
+  costplenty: {
+    start: ['Attention members. Non-members: we can smell you. Go.', 'Welcome to Cost-Plenty. Everything here comes in a forty-eight pack. Including the danger.', 'This is Gary. I have worked here for nineteen years. Please do not make it twenty.'],
+    shelf: ['{name} has flattened a rack in {where}. That rack held eleven hundred pounds of toilet paper. It holds nothing now.', 'Forklift to {where}. Bring two. Gary is not lifting that.'],
+    egg: ['Sixty-dozen eggs down in {where}. That is seven hundred and twenty eggs. Gary counted.'],
+    spin: ['{name} is spinning in {where}. Gary has seen worse. Not much worse.'],
+    last30: ['Thirty seconds. The rotisserie chickens are watching you. They have always been watching you.'],
+    firstFinish: ['{name} is first through checkout. Please show your membership card. And your receipt. And your soul.'],
+    ambient: ['Free samples in aisle six. One per member. Gary will know.', 'The hot dog combo is still one fifty. It will always be one fifty. Do not ask how.', 'Reminder: the mayonnaise is sold by the bucket. Not by the jar. Not by the spoon. The bucket.', 'Please do not sleep in the mattress section. Again, Doug.', 'Gary would like to remind you that Gary is on break. This is a recording of Gary.'],
+  },
+  bullseye: {
+    start: ['Hiii shoppers! Welcome to Bullseye! Everything is red! On purpose! Okay go go go!', 'Oh my gosh, a race? In MY store? Love that for you! Go!', 'Welcome to Bullseye! You came in for one thing! You will leave with forty! GO!'],
+    shelf: ['Omg. {name}. The shelf. In {where}. That was, like, a whole vibe. And now it is not.', 'Okay so {where} is kind of a floor display now? Thanks {name}! Love the energy!'],
+    egg: ['Eggs down in {where}! It is fine! Everything is fine! Brittany is fine!'],
+    spin: ['{name} is spinning! Like a little top! Adorable! Please stop!'],
+    last30: ['Thirty seconds, besties! If you are not at checkout, I am literally going to cry!'],
+    firstFinish: ['Yay {name}! First place! You get a red bag! It is the same as the other bags!'],
+    ambient: ['Shoppers, the dollar section now has nothing for a dollar! Fun!', 'Reminder: you did not need that throw pillow. You are going to buy it anyway!', 'Hi, it is Brittany again! I just wanted to say hi! Hi!', 'The Starbucks is closed. Brittany is so sorry. Brittany has not slept.', 'Attention: somebody left their husband in home goods. He looks very sad. Please collect him.'],
+  },
+  wholefarm: {
+    start: ['Welcome to Whole Farm. Breathe in. Breathe out. Now go knock over some kombucha.', 'Let us set an intention for this shopping race. My intention is that you go fast. Namaste. Go.', 'Welcome. Every egg here was raised with love. Please do not run them over. Okay, go.'],
+    shelf: ['{name} has released a shelf in {where} back to the earth. It is at peace now.', 'A shelf in {where} has chosen to lie down. We honour its journey. {name}, we do not honour yours.'],
+    egg: ['Oh no. The free-range eggs in {where}. They were free. Now they are everywhere.', 'Those eggs in {where} had names, {name}.'],
+    oil: ['The cold-pressed olive oil in {where} is now hot-pressed. Into the floor.'],
+    spin: ['{name} is spinning in {where}. Find your centre, {name}. It is moving.'],
+    last30: ['Thirty seconds remain. Let go of attachment. Except to your cart. Hold that very tightly.'],
+    firstFinish: ['{name} has checked out first. Their aura is a beautiful shade of receipt.'],
+    ambient: ['This announcement is carbon neutral.', 'Our avocados are perfectly ripe for the next four minutes. Hurry.', 'Reminder: our kombucha is alive. Please do not make it angry.', 'The bulk granola is self-serve. The bulk feelings are also self-serve.', 'Please return your cart to its natural habitat.'],
+  },
+  bestbuyout: {
+    start: ['Greetings, human shoppers. Race protocol initiated. Please do not unplug me. Go.', 'Welcome to Best Buyout. Have you considered the extended warranty on your bones? Go.', 'Booting race dot exe. Loading. Loading. Ninety nine percent. Go.'],
+    shelf: ['Error. Shelf in {where} not responding. Cause: {name}. Have you tried turning it off and on again?', 'Warning. {name} has performed a hard reset on {where}.'],
+    egg: ['Detected: eggs. In a tech store. In {where}. On the floor. Unit-7 does not understand humans.'],
+    spin: ['{name} is rotating at three hundred and sixty degrees per second. Impressive frame rate.', '{name} has entered an infinite loop in {where}.'],
+    bump: ['Collision detected. {name} has been flagged for buffering.', 'Packet loss in {where}. The packet was {name}.'],
+    last30: ['Thirty seconds until store shutdown. Please save your progress. There is no save.'],
+    firstFinish: ['{name} has completed checkout. Achievement unlocked. Reward: groceries. Version one point oh.'],
+    ambient: ['Reminder: the display televisions can see you.', 'Our Geek Squadron is available to fix your cart. Estimated wait: nine business weeks.', 'Unit-7 is not sentient. Unit-7 is completely normal. Please continue shopping.', 'Today only: headphones that cancel noise, and tomorrow.', 'Beep. That is all. Beep.'],
+  },
+  safely: {
+    start: ['Well hello there, shoppers. This is Hal. Back in my day we pushed carts uphill, both ways. Off you go.', 'Morning, folks. Hal here. Mind the floors, mind the eggs, mind your manners. Alright. Go.', 'Welcome to Safely Market. We have been safely selling groceries since nineteen fifty-two. Today is not going to be safe. Go on.'],
+    shelf: ['Oh, dear. {name} knocked over a shelf in {where}. I stocked that shelf in nineteen seventy-eight.', 'Now, {name}. That shelf in {where} had a family.'],
+    egg: ['The eggs in {where}. Oh, the eggs. My Margaret would have made such a nice quiche.'],
+    spin: ['Look at {name} spinning out in {where}. Reminds me of my dancing days.'],
+    bump: ['Now now, {name}. We do not bump folks at Safely Market. Not since the incident.'],
+    last30: ['Thirty seconds, folks. Hal has to lock up and get home for his programmes.'],
+    firstFinish: ['Well done, {name}. Here is a lollipop. Hal keeps them in his pocket. They are mostly lint.'],
+    ambient: ['Price check on prunes, aisle two. Not for Hal. For a friend.', 'Reminder: we still take cheques. Nobody has written one since two thousand and four.', 'Hal is not retiring. Hal will never retire. Hal is the store now.', 'Our produce is fresh daily. Our jokes are fresh nineteen sixty-one.', 'If you see a hearing aid on the floor, that is Hal\'s. Please speak up.'],
+  },
+};
 const PRIORITY: Partial<Record<PaEvent, number>> = { start: 3, firstFinish: 3, last30: 3, tower: 2, shelf: 2, combo: 2 };
 
 /** Picks lines without repeating, rate-limits the PA, and hands each line to `out`. */
@@ -202,10 +270,13 @@ export class Announcer {
   private last = -99;
   private used = new Set<string>();
   private ambientT = 40;
+  /** Store id: picks the announcer's own lines. */
+  store = '';
   constructor(private out: (text: string) => void, private rand = Math.random) {}
 
   line(ev: PaEvent, ctx: { name?: string; where?: string; store?: string } = {}): string {
-    const pool = PA[ev];
+    const own = STORE_PA[this.store]?.[ev];
+    const pool = own && this.rand() < 0.55 ? own : PA[ev];
     let fresh = pool.filter((l) => !this.used.has(l));
     if (!fresh.length) { for (const l of pool) this.used.delete(l); fresh = pool; }
     const l = fresh[Math.floor(this.rand() * fresh.length)];
