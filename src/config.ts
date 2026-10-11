@@ -177,9 +177,9 @@ export const ADDONS: AddonDef[] = [
 ];
 export const ENGINES: EngineDef[] = [
   { id: 'none', name: 'Leg Power', desc: 'You push. You sweat.', price: 0, speed: 1, accel: 1, ride: 0 },
-  { id: 'gas', name: 'Lawnmower Engine', desc: 'Pulled off a 1987 lawnmower. Loud, smoky, smells like summer. A bit faster, and putters along while you ride. Upgradable below.', price: 600, speed: 1.04, accel: 1.1, ride: 2.6 },
+  { id: 'gas', name: 'Lawnmower Engine', desc: 'Pulled off a 1987 lawnmower. Still has grass in it. Takes fourteen pulls to start, then never stops. Smells like a Saturday. Putters along while you ride.', price: 600, speed: 1.04, accel: 1.1, ride: 2.6 },
   { id: 'electric', name: 'Electric Motor', desc: 'Faster, punchier, and keeps driving while you ride (Space). Upgradable below.', price: 1200, speed: 1.08, accel: 1.2, ride: 3.4 },
-  { id: 'rocket', name: 'Surplus Rocket', desc: 'An actual rocket, strapped on with zip ties. The fastest thing in retail. Permanently on fire. Upgradable below.', price: 3000, speed: 1.18, accel: 1.42, ride: 4.6 },
+  { id: 'rocket', name: 'Surplus Rocket', desc: 'Won at a government surplus auction. No questions were asked. Attached with zip ties. The fastest thing in retail. Always on fire. The fire is load-bearing. Also drives you while you ride, mostly into things.', price: 3000, speed: 1.18, accel: 1.42, ride: 4.6 },
 ];
 export const UPGRADES: UpgradeDef[] = [
   { id: 'mSpeed', name: 'Motor · Top Speed', desc: '+5% top speed per level', price: 220, motor: true },

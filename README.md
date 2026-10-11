@@ -91,7 +91,7 @@ You earn coupons for each race based on your placing and items collected. Spend 
   - **Ground-Scraper 100**: the Sky-Scraper, but it fell over. A hundred carts nested in a row (four hundred wheels, an amber beacon, an OVERSIZE LOAD sign). Fast in a straight line; corners are a group decision.
   - **The Choo-Choo**: you, a smokestack and a cowcatcher, towing nine carts on a rope. They follow your exact path (so they take corners the way you did), push loose stock aside, and jackknife when you back up.
 
-  Every cart has its own model: the wide and long ones are built at their size (more wires at the same spacing) rather than a standard basket stretched.
+  Every item you don't own yet has a **👀 Preview** button that puts it on the turntable without buying it (long carts are shown side-on). Every cart has its own model: the wide and long ones are built at their size (more wires at the same spacing) rather than a standard basket stretched.
 - **Wheels**:
   - **Zero-Slip Treads**: no slipping on oil, yolk, milk or mayo.
   - Ice Skates, Bubblegum Rollers (sticky soda can't slow them), knobbies, Mag-Lev, Monster Truck wheels and Rocket Bearings.
@@ -162,7 +162,7 @@ Puppeteer loads the built game in headless Chromium (SwiftShader WebGL) and:
 - tests item pickup, checkout/finish, and full races with results, plus bot navigation;
 - checks performance budgets (draw calls, triangles, physics ms/step), pool recycling and LOD;
 - buys and equips from the shop, then checks the purchase survives a reload;
-- renders every garage tab, buys a cart, an add-on, the motor and upgrades (exact coupon math), and migrates an old-format save;
+- previews a cart and an engine without buying or equipping them; renders every garage tab, buys a cart, an add-on, the motor and upgrades (exact coupon math), and migrates an old-format save;
 - drives every cart body (size, weight, stacked levels); checks the custom models (wide and limo aren't stretched and have extra wheels, the Ground-Scraper's 99 nested carts, the Choo-Choo's towed carts staying on the leader's path); checks the engine order (legs < lawnmower < electric < rocket); checks that nitro, the electric motor (also while riding) and the Nitro Tank do what they say; Zero-Slip Treads don't spin on oil but casters do; the Mop-Vac clears a puddle and the Oil Dropper leaves one;
 - wrecks a shelf and checks it restocks after a minute: it waits while a cart is parked next to it, then the shelf is upright and back home, every product is back, its puddles are gone, and everything settles back to sleep;
 - renders at medium quality with shadows on and fails on any GL draw error (that's how the empty-shelves bug got through: the suite ran on low quality only);

@@ -72,17 +72,43 @@ garageScene.add(garageCart.root);
 garageCam.position.set(2.6, 1.7, 3.2); garageCam.lookAt(0, 0.7, 0);
 let backdropStore = 0, backdropT = 0;
 
+/** Something from the shop tried on (not bought): shown on the turntable instead of what you own. */
+let preview: { cat: Category; id: string; name: string } | null = null;
+/** Long carts (Ground-Scraper, Choo-Choo) are shown side-on and centred instead of spinning. */
+let garageLong = false;
+const longCenter = new THREE.Vector3(), _gbox = new THREE.Box3(), _gsize = new THREE.Vector3();
+function garageCustom(): Customization {
+  return preview ? { ...profile.custom, [preview.cat]: preview.id } as Customization : profile.custom;
+}
 function refreshGarageCart() {
-  garageCart.applyCustom(profile.custom);
+  const c = garageCustom();
+  garageCart.applyCustom(c);
+  garageCart.root.position.set(0, 0, 0);
+  garageLong = false;
   // frame whatever's on the turntable (a 100-storey cart needs a step back)
-  const b = BODIES.find((x) => x.id === profile.custom.body) ?? BODIES[0];
+  const b = BODIES.find((x) => x.id === c.body) ?? BODIES[0];
   if (b.levels > 4) { garageCam.position.set(6.5, 3.2, 8.2); garageCam.lookAt(0, 3.4, 0); }
-  else {
-    const k = Math.max(b.sx, b.sz * 0.8, b.sy, 1 + (b.levels - 1) * 0.45, (0.92 + bodyTail(b)) * 0.6, b.train ? 3.4 : 0);
+  else if (b.nest || b.train) {
+    // measure it lying straight, then park the middle of it on the turntable
+    garageCart.root.rotation.y = 0;
+    garageCart.animate(0, 0, 0, 0, false, false);
+    garageCart.root.updateMatrixWorld(true);
+    _gbox.setFromObject(garageCart.root).getCenter(longCenter);
+    const L = _gbox.getSize(_gsize).z;
+    garageLong = true;
+    const d = L * 1.3 + 1.5;
+    garageCam.position.set(d * 0.3, d * 0.42, d);
+    garageCam.lookAt(0, 0.6, 0);
+  } else {
+    const k = Math.max(b.sx, b.sz * 0.8, b.sy, 1 + (b.levels - 1) * 0.45);
     garageCam.position.set(2.6 * (0.55 + 0.45 * k), 1.7 * (0.6 + 0.4 * k), 3.2 * (0.55 + 0.45 * k));
     garageCam.lookAt(0, 0.7 * (0.5 + 0.5 * Math.max(b.sy, 1 + (b.levels - 1) * 0.8)), 0);
   }
+  const pv = $('g-preview');
+  pv.classList.toggle('hidden', !preview);
+  if (preview) pv.querySelector('span')!.textContent = preview.name;
 }
+function stopPreview() { if (preview) { preview = null; refreshGarageCart(); } }
 refreshGarageCart();
 
 // ---------------- state ----------------
@@ -228,8 +254,8 @@ function cardStats(cat: Category, id: string): string {
   return '';
 }
 function garageStats() {
-  const S = cartStats(profile.custom);
-  $('g-stats').innerHTML = `<b>Your cart</b> · top speed ${pct(S.speed)} · accel ${pct(S.accel)} · steering ${pct(S.steer)} · weight ${pct(S.mass)} · nitro ${S.nitroCap.toFixed(1)} s @ ${pct(S.nitroPower)}${S.motor ? ` · ${S.engine.id === 'rocket' ? '🚀' : S.engine.id === 'gas' ? '⛽' : '⚡'} ${S.engine.name.toLowerCase()} (motor)` : ''}`;
+  const S = cartStats(garageCustom());
+  $('g-stats').innerHTML = `<b>${preview ? `With ${/^the /i.test(preview.name) ? '' : 'the '}${preview.name} (preview)` : 'Your cart'}</b> · top speed ${pct(S.speed)} · accel ${pct(S.accel)} · steering ${pct(S.steer)} · weight ${pct(S.mass)} · nitro ${S.nitroCap.toFixed(1)} s @ ${pct(S.nitroPower)}${S.motor ? ` · ${S.engine.id === 'rocket' ? '🚀' : S.engine.id === 'gas' ? '⛽' : '⚡'} ${S.engine.name.toLowerCase()} (motor)` : ''}`;
 }
 function garageScreen(cat: Category) {
   show('garage');
@@ -256,11 +282,20 @@ function garageScreen(cat: Category) {
     b.disabled = equipped || (!owned && profile.coupons < it.price);
     b.onclick = () => {
       if (!owned) { profile.coupons -= it.price; profile.owned.push(key); sfx.pickup(); }
+      preview = null;
       (profile.custom as unknown as Record<string, string>)[cat] = it.id;
       if (cat === 'squeak') { sfx.unlock(); sfx.squeak(it.id, 1.5); }
       if (cat === 'horn') { sfx.unlock(); sfx.horn(it.id); }
       saveProfile(profile); refreshGarageCart(); garageScreen(cat);
     };
+    if (!owned && cat !== 'squeak' && cat !== 'horn') {
+      // try it on: shows on the turntable without buying it
+      const p = document.createElement('button');
+      const on = preview?.cat === cat && preview.id === it.id;
+      p.textContent = on ? '👀 Previewing' : '👀 Preview'; p.className = 'small pv' + (on ? ' on' : '');
+      p.onclick = () => { preview = on ? null : { cat, id: it.id, name: it.name }; refreshGarageCart(); garageScreen(cat); };
+      card.appendChild(p);
+    }
     if (cat === 'squeak' || cat === 'horn') { const p = document.createElement('button'); p.textContent = '▶ Preview'; p.className = 'small'; p.onclick = () => { sfx.unlock(); if (cat === 'horn') sfx.horn(it.id); else sfx.squeak(it.id, 1.5); }; card.appendChild(p); }
     card.appendChild(b);
     grid.appendChild(card);
@@ -285,7 +320,8 @@ function garageScreen(cat: Category) {
     }
   }
 }
-$('btn-garage-back').onclick = titleScreen;
+$('btn-garage-back').onclick = () => { stopPreview(); titleScreen(); };
+$('g-preview-off').onclick = () => { const cat = preview?.cat ?? 'body'; stopPreview(); garageScreen(cat); };
 
 function settingsScreen() {
   show('settings');
@@ -579,7 +615,12 @@ function loop(now: number) {
     }
   } else {
     session?.tick(dt);
-    garageCart.root.rotation.y += dt * 0.4;
+    if (garageLong) {
+      // sway side-on, keeping the middle of the cart over the turntable
+      const r = garageCart.root, th = -Math.PI / 2 + Math.sin(now / 2500) * 0.35; // nose to the left, clear of the shop panel
+      r.rotation.y = th;
+      r.position.set(-(longCenter.x * Math.cos(th) + longCenter.z * Math.sin(th)), 0, -(-longCenter.x * Math.sin(th) + longCenter.z * Math.cos(th)));
+    } else garageCart.root.rotation.y += dt * 0.4;
     garageCart.animate(dt, now / 1000, 0, 0, false, false);
     turntable.rotation.y = garageCart.root.rotation.y;
     backdropT += dt;
@@ -684,6 +725,7 @@ const api = {
   equip: (c: Partial<Customization>) => { Object.assign(profile.custom, c); saveProfile(profile); refreshGarageCart(); },
   garage: (cat: Category) => garageScreen(cat),
   garageCart: () => garageCart,
+  garagePreview: () => preview ? { ...preview, long: garageLong } : null,
   tuneRestock: Restock,
   reloadProfile: () => { profile = loadProfile(); return profile; },
   catalog: { WHEELS, SKINS, NEONS, BODIES, UPGRADES, CATEGORIES, HATS, HORNS },

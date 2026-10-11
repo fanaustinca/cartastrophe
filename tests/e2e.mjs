@@ -521,6 +521,23 @@ await T('cart bodies: every one builds, drives, and has its size / weight / leve
   await E(() => CART.setCam('fp'));
 });
 
+await T('garage: Preview tries a cart / engine on the turntable without buying or equipping it', async () => {
+  await E(() => { CART.dev('reset'); CART.garage('body'); });
+  const before = await E(() => ({ coupons: CART.profile.coupons, body: CART.profile.custom.body }));
+  await page.click('#g-items .card[data-id="body:train"] button.pv');
+  const r = await E(() => ({ pv: CART.garagePreview(), shown: CART.garageCart().body.id, coupons: CART.profile.coupons, body: CART.profile.custom.body, owned: CART.profile.owned.includes('body:train'), banner: !document.getElementById('g-preview').classList.contains('hidden') }));
+  assert(r.pv?.id === 'train' && r.pv.long && r.shown === 'train' && r.banner, 'preview not shown: ' + JSON.stringify(r));
+  assert(r.coupons === before.coupons && r.body === before.body && !r.owned, 'preview must not buy or equip: ' + JSON.stringify(r));
+  await page.click('#g-preview-off');
+  const back = await E(() => ({ pv: CART.garagePreview(), shown: CART.garageCart().body.id }));
+  assert(!back.pv && back.shown === before.body, 'Back to my cart: ' + JSON.stringify(back));
+  await E(() => CART.garage('engine'));
+  await page.click('#g-items .card[data-id="engine:rocket"] button.pv');
+  assert(await E(() => CART.garagePreview()?.id === 'rocket' && CART.profile.custom.engine === 'none'), 'engine preview');
+  await page.click('#btn-garage-back');
+  assert(await E(() => !CART.garagePreview()), 'leaving the garage ends the preview');
+});
+
 await T('custom cart models: wide / limo are built (not stretched), the Ground-Scraper nests 100 carts, the Choo-Choo tows 9 that follow your path', async () => {
   const m = await E(() => {
     const out = {};
