@@ -116,6 +116,8 @@ export interface SkinDef { id: string; name: string; price: number; color: numbe
 export interface NeonDef { id: string; name: string; price: number; color: number | null; rainbow?: boolean; police?: boolean }
 export interface SqueakDef { id: string; name: string; price: number }
 export interface TrimDef { id: string; name: string; price: number; color: number; metal?: number }
+export interface HatDef { id: string; name: string; desc: string; price: number }
+export interface HornDef { id: string; name: string; desc: string; price: number }
 /**
  * Cart bodies. s* scale the cart (not the shopper); levels stacks extra carts on top. The rest are
  * multipliers on the standard cart: speed (top speed), accel, steer, mass (collisions), cargo
@@ -227,12 +229,42 @@ export const SQUEAKS: SqueakDef[] = [
   { id: 'duck', name: 'Rubber Duck', price: 150 },
   { id: 'chicken', name: 'Rubber Chicken', price: 250 },
   { id: 'kazoo', name: 'Kazoo', price: 300 },
+  { id: 'dolphin', name: 'Dolphin', price: 300 },
+  { id: 'whoopee', name: 'Whoopee Cushion', price: 400 },
+  { id: 'baby', name: 'Baby Laugh', price: 450 },
+];
+export const HATS: HatDef[] = [
+  { id: 'cap', name: 'Team Cap', desc: 'Standard issue. Matches your shirt.', price: 0 },
+  { id: 'none', name: 'Bald & Free', desc: 'Aerodynamic scalp.', price: 0 },
+  { id: 'cone', name: 'Traffic Cone', desc: 'Found it in the parking lot. It\'s yours now.', price: 80 },
+  { id: 'party', name: 'Party Hat', desc: 'Every grocery run is a celebration.', price: 100 },
+  { id: 'chef', name: 'Chef\'s Toque', desc: 'For people who cook the eggs on the floor.', price: 150 },
+  { id: 'propeller', name: 'Propeller Beanie', desc: 'Spins faster the faster you go. Adds 0 lift.', price: 200 },
+  { id: 'cowboy', name: 'Cowboy Hat', desc: 'Yeehaw down aisle 9.', price: 200 },
+  { id: 'tinfoil', name: 'Tinfoil Hat', desc: 'The self-checkout machines can\'t read your mind.', price: 220 },
+  { id: 'viking', name: 'Viking Helmet', desc: 'Raid the dairy aisle.', price: 300 },
+  { id: 'tophat', name: 'Top Hat', desc: 'Distinguished. Destructive.', price: 300 },
+  { id: 'fish', name: 'A Whole Fish', desc: 'From the seafood counter. Nobody asked questions.', price: 350 },
+  { id: 'duck', name: 'Rubber Duck', desc: 'Sits on your head. Judges you.', price: 350 },
+  { id: 'crown', name: 'Coupon Crown', desc: 'Royalty of the checkout lane.', price: 600 },
+  { id: 'cart', name: 'Tiny Cart Hat', desc: 'A shopping cart. On your head. While you push a shopping cart.', price: 750 },
+];
+export const HORNS: HornDef[] = [
+  { id: 'bell', name: 'Bike Bell', desc: 'Ring ring. Polite. Ignored.', price: 0 },
+  { id: 'squeaky', name: 'Squeaky Toy', desc: 'Squeak squeak, coming through.', price: 120 },
+  { id: 'clown', name: 'Clown Honk', desc: 'HONK HONK. Makes everyone take you seriously.', price: 150 },
+  { id: 'duck', name: 'Duck Call', desc: 'Quack. Confuses the produce section.', price: 150 },
+  { id: 'goat', name: 'Screaming Goat', desc: 'AAAAAAAAAA', price: 300 },
+  { id: 'trombone', name: 'Sad Trombone', desc: 'Wah wah wahhh. Perfect for spin-outs.', price: 300 },
+  { id: 'air', name: 'Stadium Air Horn', desc: 'Startles bots so badly they jump.', price: 350 },
+  { id: 'cucaracha', name: 'La Cucaracha', desc: 'The full tune. Every time.', price: 450 },
+  { id: 'train', name: 'Freight Train', desc: 'CHOO CHOOOO. Clear the aisle.', price: 500 },
 ];
 
 export type Upgrades = Record<UpgradeId, number>;
-export interface Customization { wheel: string; skin: string; neon: string; squeak: string; trim: string; body: string; addon: string; engine: string; up: Upgrades }
+export interface Customization { wheel: string; skin: string; neon: string; squeak: string; trim: string; body: string; addon: string; engine: string; hat: string; horn: string; up: Upgrades }
 export const NO_UPGRADES: Upgrades = { mSpeed: 0, mAccel: 0, mTorque: 0, nPower: 0, nCap: 0, nRecharge: 0 };
-export const DEFAULT_CUSTOM: Customization = { wheel: 'caster', skin: 'chrome', neon: 'none', squeak: 'classic', trim: 'red', body: 'standard', addon: 'none', engine: 'none', up: { ...NO_UPGRADES } };
+export const DEFAULT_CUSTOM: Customization = { wheel: 'caster', skin: 'chrome', neon: 'none', squeak: 'classic', trim: 'red', body: 'standard', addon: 'none', engine: 'none', hat: 'cap', horn: 'bell', up: { ...NO_UPGRADES } };
 
 /** Everything a cart's physics needs from its parts and upgrades. */
 export interface CartStats {

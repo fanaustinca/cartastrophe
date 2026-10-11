@@ -4,6 +4,7 @@ import type { Game } from './game';
 import { KIND_BY_ID, STORE_BY_ID, kindName } from './config';
 import { SHELF_LEN, SHELF_DEPTH } from './shelves';
 import type { Cluster } from './guides';
+import { COMBO_WINDOW, money } from './fun';
 
 const $ = (id: string) => document.getElementById(id)!;
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -24,6 +25,7 @@ export class Hud {
   private acc = 0;
   private lastMsgKey = '';
   private lastListKey = '';
+  private lastCombo = 0;
   private map = $('h-map') as HTMLCanvasElement;
   private big = $('h-bigmap') as HTMLCanvasElement;
 
@@ -39,6 +41,9 @@ export class Hud {
     this.lastMsgKey = '';
     this.lastListKey = '';
     this.toggleMap(false);
+    this.lastCombo = 0;
+    $('h-pa').classList.add('hidden'); $('h-pa').dataset.t = '';
+    $('h-combo').classList.add('hidden');
   }
 
   update(g: Game, dt: number, fps: number) {
@@ -87,6 +92,23 @@ export class Hud {
     // messages
     const key = g.messages.map((m) => m.text).join('|');
     if (key !== this.lastMsgKey) { this.lastMsgKey = key; $('h-msgs').innerHTML = g.messages.map((m) => `<div style="color:${m.color}">${m.text}</div>`).join(''); }
+    // store PA + chaos combo
+    const pa = $('h-pa');
+    if (g.pa && pa.dataset.t !== g.pa.text) {
+      pa.dataset.t = g.pa.text;
+      pa.querySelector('span')!.textContent = g.pa.text;
+      pa.classList.remove('hidden');
+      pa.style.animation = 'none'; void pa.offsetWidth; pa.style.animation = '';
+    } else if (!g.pa && pa.dataset.t) { pa.dataset.t = ''; pa.classList.add('hidden'); }
+    const ch = g.local.chaos, live = g.simTime - ch.comboT < COMBO_WINDOW && ch.combo >= 2;
+    const cb = $('h-combo');
+    cb.classList.toggle('hidden', ch.style <= 0);
+    cb.classList.toggle('cold', !live);
+    const x = cb.firstElementChild as HTMLElement;
+    if (live && ch.combo !== this.lastCombo) { x.textContent = `CHAOS ×${ch.combo}`; x.classList.remove('pop'); void x.offsetWidth; x.classList.add('pop'); }
+    if (!live && this.lastCombo) x.textContent = '';
+    this.lastCombo = live ? ch.combo : 0;
+    (cb.lastElementChild as HTMLElement).textContent = `💸 ${money(ch.style)} in damages`;
     $('h-fps').textContent = `${fps.toFixed(0)} fps · phys ${g.stats.physMs.toFixed(1)}ms · awake items ${g.world.items.awakeCount} · shelves ${g.world.shelves.awakeCount()}`;
     this.drawMinimap(g);
     if (this.bigMap) this.drawBigMap(g);

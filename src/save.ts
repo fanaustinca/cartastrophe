@@ -1,5 +1,6 @@
 // Player profile persisted in localStorage (wrapped: storage can be blocked).
-import { Customization, DEFAULT_CUSTOM, NO_UPGRADES, WHEELS, SKINS, NEONS, SQUEAKS, BODIES, ADDONS, ENGINES, TRIMS } from './config';
+import { today, type DailyState } from './fun';
+import { Customization, DEFAULT_CUSTOM, NO_UPGRADES, WHEELS, SKINS, NEONS, SQUEAKS, BODIES, ADDONS, ENGINES, TRIMS, HATS, HORNS } from './config';
 
 export interface Profile {
   name: string;
@@ -10,10 +11,13 @@ export interface Profile {
   quality: 'low' | 'medium' | 'high';
   volume: number;
   races: number;
+  xp: number;
+  daily: DailyState;
+  voice: boolean;
 }
 
 const KEY = 'cartastrophe.profile.v1';
-const STARTER = ['wheel:caster', 'skin:chrome', 'neon:none', 'squeak:classic', 'body:standard', 'addon:none', 'engine:none', 'trim:red'];
+const STARTER = ['wheel:caster', 'skin:chrome', 'neon:none', 'squeak:classic', 'body:standard', 'addon:none', 'engine:none', 'trim:red', 'hat:cap', 'hat:none', 'horn:bell'];
 const fresh = (): Profile => ({
   name: 'Shopper' + Math.floor(100 + Math.random() * 900),
   coupons: 200,
@@ -23,6 +27,9 @@ const fresh = (): Profile => ({
   quality: 'medium',
   volume: 0.7,
   races: 0,
+  xp: 0,
+  daily: { day: today(), prog: {}, claimed: [] },
+  voice: true,
 });
 
 export function loadProfile(reset = false): Profile {
@@ -35,6 +42,7 @@ export function loadProfile(reset = false): Profile {
       const p = { ...fresh(), ...old };
       p.custom = { ...DEFAULT_CUSTOM, ...old.custom, up: { ...NO_UPGRADES, ...old.custom?.up } };
       p.owned = [...new Set([...STARTER, ...(old.owned ?? [])])];
+      if (p.daily?.day !== today()) p.daily = { day: today(), prog: {}, claimed: [] };
       return p;
     }
   } catch { /* blocked or corrupt */ }
@@ -53,5 +61,7 @@ export const CATEGORIES = {
   trim: TRIMS,
   neon: NEONS,
   squeak: SQUEAKS,
+  hat: HATS,
+  horn: HORNS,
 } as const;
 export type Category = keyof typeof CATEGORIES;

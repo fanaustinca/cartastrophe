@@ -1,12 +1,12 @@
 // Multiplayer session: lobby membership, race start, and the in-race protocol.
 //
 // Host-relayed star:   client ──st (own cart, 20 Hz)──▶ host ──ss (all carts, 20 Hz)──▶ clients
-//                      any    ──ev (collect/smash/fin/bump/drop/vac/restock)──▶ host ──relay──▶ others
+//                      any    ──ev (collect/smash/fin/bump/drop/vac/restock/honk/say)──▶ host ──relay──▶ others
 // Each machine simulates its own cart (instant response); the host also simulates bots.
 // Remote carts are kinematic bodies posed by the Interpolator, so they still shove shelves
 // and items locally. Timestamps are in host-clock seconds (Clock does ping/pong sync).
 import { Transport, PeerTransport, LocalTransport, Clock, Msg, Snap } from './net';
-import { Customization, MAX_PLAYERS, BOT_NAMES, RACE_TIME, NET_HZ, STORES, DEFAULT_CUSTOM, WHEELS, SKINS, NEONS, SQUEAKS, BODIES, ADDONS, ENGINES, TRIMS, UPGRADES, MAX_LEVEL, NO_UPGRADES, Upgrades } from './config';
+import { Customization, MAX_PLAYERS, BOT_NAMES, RACE_TIME, NET_HZ, STORES, DEFAULT_CUSTOM, WHEELS, SKINS, NEONS, SQUEAKS, BODIES, ADDONS, ENGINES, TRIMS, HATS, HORNS, UPGRADES, MAX_LEVEL, NO_UPGRADES, Upgrades } from './config';
 import { PlayerInfo, RaceConfig, SLOT_COLORS, Game, ResultRow } from './game';
 
 export interface LobbyPlayer { id: string; name: string; custom: Customization; slot: number }
@@ -123,9 +123,11 @@ export class Session {
         break;
       }
       case 'smash': { const it = g.world.items.all[e.id as number]; if (it?.alive) g.smash(it, 0, false); break; }
-      case 'fin': { const p = g.players.find((q) => q.slot === e.slot); if (p) { p.done = true; p.finishTime = e.time as number; } break; }
+      case 'fin': g.remoteFinish(e.slot as number, e.time as number); break;
       case 'bump': g.applyBump(e.to as number, e.ix as number, e.iz as number); break;
-      case 'drop': g.dropOil(e.x as number, e.z as number, null, false); break;
+      case 'drop': g.dropOil(e.x as number, e.z as number, g.players.find((q) => q.slot === e.slot) ?? null, false); break;
+      case 'honk': { const p = g.players.find((q) => q.slot === e.slot); if (p && p !== g.local) g.honk(p, false); break; }
+      case 'say': { const p = g.players.find((q) => q.slot === e.slot); if (p && p !== g.local) p.cart.model.speak(String(e.text).slice(0, 80)); break; }
       case 'vac': g.world.hazards.vacuum(e.x as number, e.z as number, e.r as number, e.d as number); break;
       case 'restock': g.doRestock(e.g as number, false); break;
       case 'end': g.endRace(e.results as ResultRow[]); break;
@@ -196,7 +198,8 @@ export function sanitize(c: Partial<Customization> | undefined): Customization {
     wheel: ok(WHEELS, c?.wheel, DEFAULT_CUSTOM.wheel), skin: ok(SKINS, c?.skin, DEFAULT_CUSTOM.skin),
     neon: ok(NEONS, c?.neon, DEFAULT_CUSTOM.neon), squeak: ok(SQUEAKS, c?.squeak, DEFAULT_CUSTOM.squeak),
     trim: ok(TRIMS, c?.trim, DEFAULT_CUSTOM.trim), body: ok(BODIES, c?.body, DEFAULT_CUSTOM.body),
-    addon: ok(ADDONS, c?.addon, DEFAULT_CUSTOM.addon), engine: ok(ENGINES, c?.engine, DEFAULT_CUSTOM.engine), up,
+    addon: ok(ADDONS, c?.addon, DEFAULT_CUSTOM.addon), engine: ok(ENGINES, c?.engine, DEFAULT_CUSTOM.engine),
+    hat: ok(HATS, c?.hat, DEFAULT_CUSTOM.hat), horn: ok(HORNS, c?.horn, DEFAULT_CUSTOM.horn), up,
   };
 }
 /** Bots dress up too: mostly sensible carts, now and then something ridiculous. */
@@ -205,5 +208,5 @@ export function randomCustom(): Customization {
   const r = Math.random();
   const body = r < 0.5 ? 'standard' : r < 0.97 ? p(BODIES.filter((b) => b.id !== 'tower')) : 'tower';
   const up: Upgrades = { ...NO_UPGRADES, nPower: Math.floor(Math.random() * 3), nCap: Math.floor(Math.random() * 3) };
-  return { wheel: p(WHEELS), skin: p(SKINS), neon: p(NEONS), squeak: p(SQUEAKS), trim: p(TRIMS), body, addon: p(ADDONS), engine: 'none', up };
+  return { wheel: p(WHEELS), skin: p(SKINS), neon: p(NEONS), squeak: p(SQUEAKS), trim: p(TRIMS), body, addon: p(ADDONS), engine: 'none', hat: p(HATS), horn: p(HORNS), up };
 }

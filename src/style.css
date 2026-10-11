@@ -19,7 +19,7 @@ button small { opacity: 0.75; font-weight: 500; font-size: 0.8rem; margin-left: 
 input, select { font: inherit; color: var(--text); background: rgba(0, 0, 0, 0.4); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
 .hidden { display: none !important; }
 
-.screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px; background: radial-gradient(ellipse at center, rgba(10, 12, 20, 0.35), rgba(5, 6, 10, 0.85)); overflow-y: auto; z-index: 10; }
+.screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: safe center; gap: 14px; padding: 24px 16px; background: radial-gradient(ellipse at center, rgba(10, 12, 20, 0.35), rgba(5, 6, 10, 0.85)); overflow-y: auto; z-index: 10; }
 .screen.show { display: flex; }
 #loading { background: #0c0e14; z-index: 50; }
 .spinner { width: 48px; height: 48px; border: 5px solid rgba(255, 255, 255, 0.15); border-top-color: var(--red); border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -116,7 +116,7 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 #h-fps { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); font: 600 0.7rem monospace; color: var(--muted); }
 
 #r-table { border-collapse: collapse; min-width: min(560px, 100%); background: var(--panel); border-radius: 12px; overflow: hidden; }
-#r-table td, #r-table th { padding: 8px 14px; border-bottom: 1px solid var(--line); text-align: left; }
+#r-table td, #r-table th { padding: 5px 14px; border-bottom: 1px solid var(--line); text-align: left; }
 #r-table tr.me { color: var(--yellow); }
 
 @media (max-width: 720px) {
@@ -130,3 +130,48 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 #dev { position: fixed; left: 0; right: 0; top: 0; z-index: 60; background: rgba(5, 6, 10, 0.92); border-bottom: 2px solid var(--yellow); font: 600 0.85rem monospace; padding: 8px 12px; }
 #dev-out { max-height: 30vh; overflow-y: auto; white-space: pre-wrap; color: #b8ffb0; margin-bottom: 6px; }
 #dev-in { width: 100%; font-family: monospace; }
+
+/* ---- comedy layer ---- */
+#h-pa { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); width: min(620px, calc(100vw - 500px)); min-width: 280px; background: rgba(20, 16, 6, 0.86); border: 2px solid var(--yellow); border-radius: 12px; padding: 6px 14px 8px; text-align: center; animation: pa-in 0.35s ease-out; }
+#h-pa b { display: block; color: var(--yellow); font-size: 0.68rem; letter-spacing: 3px; }
+#h-pa span { font-size: 1rem; color: #fff; font-weight: 700; }
+@keyframes pa-in { from { transform: translate(-50%, 30px); opacity: 0; } }
+#h-combo { position: absolute; left: 18px; top: 186px; transform: rotate(-4deg); transform-origin: left; }
+#h-combo .x { font: 900 2.6rem 'Arial Black', Impact, sans-serif; color: #ff7a2a; line-height: 1; }
+#h-combo .x.pop { animation: pop 0.25s ease-out; }
+#h-combo .d { font: 900 1rem 'Arial Black', Impact, sans-serif; color: var(--yellow); }
+#h-combo.cold .x { opacity: 0.35; }
+@media (max-width: 720px) { #h-pa { width: calc(100vw - 24px); bottom: 170px; } #h-combo { top: 12px; } #h-combo .x { font-size: 1.6rem; } }
+
+.rank { width: min(360px, 100%); font-size: 0.85rem; color: var(--muted); text-align: center; }
+.rank b { color: #fff; }
+.rank .bar { height: 7px; }
+.rank .bar div { height: 100%; background: linear-gradient(90deg, #ffd23a, #ff7a2a); }
+.daily { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-size: 0.85rem; }
+.daily:empty { display: none; }
+.daily .t { color: var(--yellow); font-weight: 800; letter-spacing: 1px; font-size: 0.75rem; margin-bottom: 4px; }
+.daily .c { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.daily .c span:first-child { flex: 1; }
+.daily .c .p { color: var(--muted); font-variant-numeric: tabular-nums; }
+.daily .c.done { color: #7affb0; }
+.daily .c.new { animation: pop 0.4s ease-out; color: var(--yellow); }
+label.check { flex-direction: row; align-items: center; gap: 10px; }
+
+.r-wrap { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+.r-left { display: flex; flex-direction: column; gap: 10px; }
+.awards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px; max-width: 560px; }
+.awards div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 0.85rem; }
+.awards b { color: var(--yellow); }
+.awards i { color: var(--muted); font-style: normal; font-size: 0.78rem; }
+.receipt { width: 300px; background: #f6f3ea; color: #222; font: 700 0.72rem 'Courier New', monospace; padding: 14px 14px 10px; transform: rotate(1.2deg); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); text-shadow: none; animation: print 0.9s ease-out; transform-origin: top; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 95% 100%, 90% calc(100% - 6px), 85% 100%, 80% calc(100% - 6px), 75% 100%, 70% calc(100% - 6px), 65% 100%, 60% calc(100% - 6px), 55% 100%, 50% calc(100% - 6px), 45% 100%, 40% calc(100% - 6px), 35% 100%, 30% calc(100% - 6px), 25% 100%, 20% calc(100% - 6px), 15% 100%, 10% calc(100% - 6px), 5% 100%, 0 calc(100% - 6px)); }
+@keyframes print { from { transform: rotate(1.2deg) scaleY(0); } }
+.receipt .rc-h { text-align: center; font-size: 1.1rem; font-weight: 900; }
+.receipt .rc-s { text-align: center; font-size: 0.66rem; }
+.receipt .rc-d { border-top: 2px dashed #888; margin: 6px 0; }
+.receipt .rr { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.receipt .rr span:last-child { white-space: nowrap; }
+.receipt .rr.tot { font-size: 0.9rem; font-weight: 900; }
+.receipt .rc-n { text-align: center; padding: 8px 0; }
+.receipt .rc-f { text-align: center; font-size: 0.64rem; }
+.receipt .rc-bar { height: 30px; margin-top: 6px; background: repeating-linear-gradient(90deg, #222 0 2px, transparent 2px 4px, #222 4px 7px, transparent 7px 8px, #222 8px 9px, transparent 9px 12px); }
+.card .ic { font-size: 2rem; line-height: 1.1; }

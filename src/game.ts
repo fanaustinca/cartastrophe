@@ -10,7 +10,10 @@ import { Customization, KIND_BY_ID, STORE_BY_ID, LIST_SIZE, MESS, INTERP_DELAY }
 import { Rng } from './rng';
 import { Guides } from './guides';
 import { Restock } from './restock';
+import { Popups } from './popups';
+import { Announcer, Chaos, newChaos, addChaos, talk, money, PRICE, SHELF_PRICE, BUMP_PRICE, DROP_PRICE, type PaEvent, type TalkEvent } from './fun';
 import type { Item } from './items';
+import type { Shelf } from './shelves';
 import type { Sfx } from './audio';
 
 export interface PlayerInfo { slot: number; id: string; name: string; color: number; custom: Customization; bot: boolean }
@@ -43,6 +46,8 @@ export class Participant {
   netItems = 0; // remote: collected count from snapshots
   lastGrab = 0;
   left = false;
+  chaos: Chaos = newChaos();
+  honkT = -9;
   constructor(public info: PlayerInfo, public cart: Cart, public remote: boolean) {}
   get slot() { return this.info.slot; }
 }
@@ -98,6 +103,19 @@ export class Game {
   restock: Restock;
   botsFrozen = false;
   readonly isSolo: boolean;
+  /** Store PA: the announcement currently on screen. */
+  pa: { text: string; t: number } | null = null;
+  announcer: Announcer;
+  popups = new Popups();
+  private cartByCollider = new Map<number, Participant>();
+  private cartMapT = -9;
+  private shelfBy = new Map<number, { p: Participant; t: number }>();
+  private shelfDown = new Set<number>();
+  private pairT = new Map<string, number>();
+  private said30 = false;
+  private firstDone = false;
+  private honkHeld = false;
+  private botHonkT = 0;
 
   constructor(public cfg: RaceConfig, public localSlot: number, private sfx: Sfx, opts: { quality: 'low' | 'medium' | 'high'; envMap: THREE.Texture | null; net?: NetHooks | null; aspect: number; thumb?: (id: string) => HTMLCanvasElement }) {
     this.net = opts.net ?? null;
@@ -133,6 +151,8 @@ export class Game {
       cfg.list = makeList(cfg.seed, stock);
     }
     this.world.items.onBreak = (it, f) => this.smash(it, f, true);
+    this.announcer = new Announcer((text) => { this.pa = { text, t: 6.5 }; this.sfx.chime(); this.sfx.speak(text); });
+    this.scene.add(this.popups.group);
     this.restock = new Restock(this.world);
 
     for (const info of cfg.players) this.addPlayer(info);
@@ -164,10 +184,10 @@ export class Game {
     }
     cart.onImpact = (force, other) => this.onCartImpact(p, force, other);
     cart.onDrop = (x, z) => this.dropOil(x, z, p, true);
+    cart.onSpin = (t) => this.onSpin(p, t);
     if (isLocal) {
       cart.onNitro = () => this.sfx.boost();
       cart.onBoost = (k) => { this.sfx.boost(); this.flash(k === 'nitro' ? 'CHECKOUT NITRO!' : 'PROMO BOOST!', '#ffd23a'); };
-      cart.onSpin = (t) => { this.sfx.spin(); this.flash(t === 'oil' ? 'OIL SLICK! SPINNING OUT' : `SLIPPED ON ${t.toUpperCase()}!`, '#ff7a3a'); this.shake = Math.max(this.shake, 0.3); };
     }
     this.players.push(p);
     return p;
@@ -201,9 +221,14 @@ export class Game {
       else this.countdown = this.startAt - this.net!.clock.hostNow();
       const n = Math.ceil(this.countdown);
       if (n !== this.lastCount && n >= 0) { this.lastCount = n; if (n > 0) this.sfx.beep(false); this.onCountdownTick?.(n); }
-      if (this.countdown <= 0) { this.phase = 'race'; this.sfx.beep(true); this.flash('GO! GO! GO!', '#7aff7a'); }
+      if (this.countdown <= 0) {
+        this.phase = 'race'; this.sfx.beep(true); this.flash('GO! GO! GO!', '#7aff7a');
+        const tower = this.players.find((p) => p.cart.stats.body.levels > 50);
+        this.announce(tower ? 'tower' : 'start', tower);
+      }
     } else if (this.phase === 'race') {
       this.raceTime += dt;
+      if (!this.said30 && this.cfg.time - this.raceTime <= 30) { this.said30 = true; this.announce('last30'); }
       if (this.authority && (this.raceTime >= this.cfg.time || this.players.every((p) => p.done || p.left))) this.endRace();
     }
 
@@ -215,6 +240,10 @@ export class Game {
     else { Object.assign(L.input, NO_INPUT); if (this.local.done) L.input.throttle = L.fwdSpeed > 0.3 ? -0.5 : 0; }
     // bots
     for (const p of this.players) if (p.bot) { if (racing && !this.botsFrozen) p.bot.update(dt); else Object.assign(p.cart.input, NO_INPUT); }
+    // horn: on press (any time but after the race)
+    if (src.honk && !this.honkHeld && this.phase !== 'over') this.honk(this.local, true);
+    this.honkHeld = src.honk;
+    if (racing && this.authority && !this.botsFrozen) this.botHonks(dt);
     // drive dynamic carts, pose kinematic (remote) carts from the interpolator
     const renderT = this.net ? this.net.clock.hostNow() - INTERP_DELAY : 0;
     for (const p of this.players) {
@@ -227,6 +256,11 @@ export class Game {
     this.world.items.watchdog(dt);
     this.restock.afterStep();
     this.simTime += dt;
+    this.local.chaos.topSpeed = Math.max(this.local.chaos.topSpeed, L.speed());
+    for (const sh of this.world.shelves.shelves) {
+      if (sh.toppled && !this.shelfDown.has(sh.index)) { this.shelfDown.add(sh.index); this.onShelfDown(sh); }
+      else if (!sh.toppled && this.shelfDown.has(sh.index)) this.shelfDown.delete(sh.index);
+    }
     for (const p of this.players) if (!p.remote && p.cart.stats.addon === 'vacuum') this.vacuum(p, dt);
     if (this.authority) {
       const carts = this.players.map((q) => q.cart.body.translation());
@@ -267,6 +301,7 @@ export class Game {
     p.lastGrab = this.simTime;
     p.cart.setCargoMass(p.cargo.reduce((s, k) => s + KIND_BY_ID[k].mass, 0));
     p.cart.model.setCargo(p.cargo);
+    if (p.bot && this.authority && Math.random() < 0.08) this.say(p, 'grab');
     if (p === this.local) {
       this.sfx.pickup();
       const left = this.needs(p);
@@ -286,6 +321,14 @@ export class Game {
     this.world.hazards.burst(t.x, Math.max(0.05, t.y), t.z, col, 14, 2.4, 0.03);
     this.world.hazards.burst(t.x, Math.max(0.05, t.y), t.z, fr.mess === 'egg' ? 0xf6f0e6 : it.color.getHex(), 10, 3, 0.025);
     this.smashed++;
+    // who did it: whoever last rammed the shelf it fell off, else the nearest cart
+    const by = this.recentShelfHitter(it.shelf, 8) ?? this.nearestCart(t.x, t.z, 3.5);
+    if (by) {
+      const k = it.kind.id;
+      by.chaos.smashed[k] = (by.chaos.smashed[k] ?? 0) + 1;
+      this.book(by, PRICE[k] ?? 2, t.x, t.y + 0.4, t.z);
+      this.announce(fr.mess as PaEvent, by, this.world.whereIs(t.x, t.z), by === this.local ? 0.3 : 0.12);
+    }
     const d = Math.hypot(t.x - this.camera.position.x, t.z - this.camera.position.z);
     if (d < 18 && Math.random() < 0.6) this.sfx.splat(fr.mess);
     if (announce && this.net && it.id < this.world.items.all.length) this.net.event({ e: 'smash', id: it.id });
@@ -300,6 +343,9 @@ export class Game {
     }
     // dramatize shelf hits: a shove near the top. Normal-speed bumps only rock the shelf
     // (the stabilizer rights it); a sprinting / boosted ram is what sends it over.
+    if (sh && sp > 2) this.shelfBy.set(sh.index, { p, t: this.simTime });
+    const victim = sh ? undefined : this.cartOf(other);
+    if (victim && victim !== p && sp > 2.5) this.onBump(p, victim, sp);
     if (sh && sp > 3 && !p.remote) {
       const last = this.shelfHitT.get(sh.index) ?? -9;
       if (this.simTime - last > 0.35) {
@@ -337,15 +383,18 @@ export class Game {
     const t = p.cart.body.translation(), v = p.cart.body.linvel();
     const it = this.world.items.spawn(KIND_BY_ID[kind], new THREE.Vector3(t.x, 1.3, t.z), new THREE.Vector3(v.x * 0.6 + (Math.random() - 0.5) * 3, 3.5, v.z * 0.6 + (Math.random() - 0.5) * 3));
     if (it) p.lastGrab = this.simTime + 0.8; // don't instantly re-grab it
-    if (p === this.local) this.flash(`${KIND_BY_ID[kind].label.toUpperCase()} FLEW OUT!`, '#ff5a5a');
+    p.chaos.flung++;
+    if (p.bot && this.authority) this.say(p, 'flung', 0.8);
+    if (p === this.local) { this.flash(`${KIND_BY_ID[kind].label.toUpperCase()} FLEW OUT!`, '#ff5a5a'); this.announce('flung', p, undefined, 0.3); }
   }
 
   /** Oil Dropper: a fresh slick behind the cart. */
   dropOil(x: number, z: number, by: Participant | null, announce: boolean) {
     this.world.hazards.addSlick('oil', x, z, 1.15, 0.5);
     this.world.hazards.burst(x, 0.3, z, MESS.oil.color, 10, 1.6, 0.03);
+    if (by) { by.chaos.drops++; this.book(by, DROP_PRICE, x, 0.6, z); this.announce('drop', by, undefined, by === this.local ? 0.25 : 0.4); }
     if (by === this.local) { this.flash('OIL DROPPED! 😈', '#ffb03a'); this.sfx.splat('oil'); }
-    if (announce && this.net) this.net.event({ e: 'drop', x, z });
+    if (announce && this.net) this.net.event({ e: 'drop', x, z, slot: by?.slot ?? -1 });
   }
 
   private vacT = new Map<Participant, { d: number; t: number }>();
@@ -374,6 +423,140 @@ export class Game {
     if (announce && this.net) this.net.event({ e: 'restock', g: index });
     const t = this.local.cart.body.translation();
     if (Math.hypot(t.x - g.x, t.z - g.z) < 20) this.flash(g.shelf ? '♻ SHELF RESTOCKED' : '♻ DISPLAY RESTOCKED', '#7affb0');
+    if (g.shelf) this.announce('restock', null, this.world.whereIs(g.x, g.z), 0.35);
+  }
+
+  // ---------------- comedy ----------------
+  /** Store PA, with the usual context filled in. */
+  announce(ev: PaEvent, who: Participant | null = null, where?: string, chance = 1) {
+    if (!where && who) { const t = who.cart.body.translation(); where = this.world.whereIs(t.x, t.z); }
+    this.announcer.say(ev, this.simTime, { name: who?.info.name, where, store: this.world.def.name }, chance);
+  }
+
+  /** A bot (on the machine that runs it) says something in a speech bubble; everyone sees it. */
+  say(p: Participant, ev: TalkEvent, chance = 1) {
+    if (Math.random() > chance || p.cart.model.bubble) return;
+    const text = talk(p.info.name, ev);
+    p.cart.model.speak(text);
+    if (this.net) this.net.event({ e: 'say', slot: p.slot, text });
+  }
+
+  /** Book damages to a shopper; the local player gets a floating price tag and a combo. */
+  private book(p: Participant, dollars: number, x: number, y: number, z: number, label?: string) {
+    const m = addChaos(p.chaos, dollars, this.simTime);
+    if (p !== this.local) return;
+    const big = dollars >= 100;
+    this.popups.spawn(label ?? '-' + money(dollars), x, y, z, big ? '#ff5a3a' : m > 1 ? '#ffb03a' : '#ffd23a', big ? 0.55 : 0.3, big ? 2 : 1.3);
+    if (p.chaos.combo === 5 || p.chaos.combo === 10) this.announce('combo', p);
+  }
+
+  private nearestCart(x: number, z: number, r: number): Participant | null {
+    let best: Participant | null = null, bd = r;
+    for (const p of this.players) { const t = p.cart.body.translation(), d = Math.hypot(t.x - x, t.z - z); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
+  private recentShelfHitter(shelf: number, within: number): Participant | null {
+    if (shelf < 0) return null;
+    const h = this.shelfBy.get(shelf);
+    return h && this.simTime - h.t < within ? h.p : null;
+  }
+  /** Collider handle → the cart it belongs to (rebuilt lazily: bodies can swap colliders). */
+  private cartOf(h: number): Participant | undefined {
+    const p = this.cartByCollider.get(h);
+    if (p || this.simTime - this.cartMapT < 1) return p;
+    this.cartMapT = this.simTime;
+    this.cartByCollider.clear();
+    for (const q of this.players) for (const c of q.cart.colliders) this.cartByCollider.set(c.handle, q);
+    return this.cartByCollider.get(h);
+  }
+
+  private onShelfDown(sh: Shelf) {
+    const t = sh.body.translation();
+    const by = this.recentShelfHitter(sh.index, 6);
+    const lt = this.local.cart.body.translation();
+    if (Math.hypot(lt.x - t.x, lt.z - t.z) < 12) this.shake = Math.max(this.shake, 0.45);
+    if (!by) return;
+    by.chaos.shelves++;
+    this.book(by, SHELF_PRICE, t.x, this.world.def.shelfHeight + 0.6, t.z, 'TIMBER! -' + money(SHELF_PRICE));
+    if (by === this.local) this.flash('🏚 SHELF FLATTENED!', '#ff7a3a');
+    this.announce('shelf', by, this.world.whereIs(t.x, t.z), by === this.local ? 0.8 : 0.35);
+  }
+
+  /** Cart-on-cart: counted once per pair per second, credited to whoever was going faster. */
+  private onBump(p: Participant, victim: Participant, sp: number) {
+    const key = Math.min(p.slot, victim.slot) + ':' + Math.max(p.slot, victim.slot);
+    if (this.simTime - (this.pairT.get(key) ?? -9) < 1 || sp < victim.cart.speed() - 0.5) return;
+    this.pairT.set(key, this.simTime);
+    p.chaos.bumps++; victim.chaos.bumped++;
+    const t = victim.cart.body.translation();
+    this.book(p, BUMP_PRICE, t.x, 2.1, t.z, 'EMOTIONAL DAMAGE -' + money(BUMP_PRICE));
+    if (this.authority) {
+      if (victim.bot) this.say(victim, 'bumped', 0.75);
+      else if (p.bot) this.say(p, 'bump', 0.5);
+    }
+    this.announce('bump', p, undefined, 0.06);
+  }
+
+  private onSpin(p: Participant, type: string) {
+    p.chaos.spins++;
+    if (p === this.local) {
+      this.sfx.spin(); this.shake = Math.max(this.shake, 0.3);
+      this.flash(type === 'oil' ? 'OIL SLICK! SPINNING OUT' : `SLIPPED ON ${type.toUpperCase()}!`, '#ff7a3a');
+    }
+    if (p.bot && this.authority) this.say(p, 'spin', 0.6);
+    this.announce('spin', p, undefined, p === this.local ? 0.3 : 0.12);
+  }
+
+  /** Horn (H). Bots right in front of a honk jump out of their skin. */
+  honk(p: Participant, announce: boolean) {
+    if (this.simTime - p.honkT < 0.45) return;
+    p.honkT = this.simTime;
+    p.chaos.honks++;
+    const a = p.cart.body.translation(), lt = this.local.cart.body.translation();
+    const d = Math.hypot(a.x - lt.x, a.z - lt.z);
+    this.sfx.horn(p.info.custom.horn, p === this.local ? 1 : Math.max(0, 1 - d / 28));
+    this.popups.spawn('HONK!', a.x, 2.4 * Math.max(1, p.cart.stats.body.sy), a.z, '#ffffff', 0.3, 0.9);
+    if (this.authority) {
+      const f = p.cart.forward(_v), loud = p.info.custom.horn === 'air' || p.info.custom.horn === 'train' ? 1.35 : 1;
+      for (const q of this.players) {
+        if (!q.bot || q === p || q.remote) continue;
+        const b = q.cart.body.translation(), dx = b.x - a.x, dz = b.z - a.z, ahead = dx * f.x + dz * f.z, side = Math.abs(dx * f.z - dz * f.x);
+        if (ahead < 0.3 || ahead > 7 * loud || side > 2.5) continue;
+        q.cart.body.applyImpulse({ x: 0, y: q.cart.body.mass() * 2.6 * loud, z: 0 }, true);
+        this.say(q, 'honked', 0.85);
+      }
+    }
+    if (p === this.local && p.chaos.honks % 20 === 0) this.announce('honk', p);
+    if (announce && this.net) this.net.event({ e: 'honk', slot: p.slot });
+  }
+
+  /** Bots lean on the horn when someone's in their way (or they just won). */
+  private botHonks(dt: number) {
+    this.botHonkT -= dt;
+    if (this.botHonkT > 0) return;
+    this.botHonkT = 0.5;
+    for (const p of this.players) {
+      if (!p.bot || p.done) continue;
+      const a = p.cart.body.translation(), f = p.cart.forward(_v);
+      const blocked = this.players.some((q) => {
+        if (q === p) return false;
+        const b = q.cart.body.translation(), dx = b.x - a.x, dz = b.z - a.z, ahead = dx * f.x + dz * f.z;
+        return ahead > 0.4 && ahead < 4.5 && Math.abs(dx * f.z - dz * f.x) < 1.4;
+      });
+      if (blocked && p.cart.speed() < 3.5 && Math.random() < 0.12) this.honk(p, true);
+    }
+  }
+
+  /** A remote peer's cart crossed the line. */
+  remoteFinish(slot: number, time: number) {
+    const p = this.players.find((q) => q.slot === slot);
+    if (!p || p.done) return;
+    p.done = true; p.finishTime = time;
+    this.onFinished(p);
+  }
+  private onFinished(p: Participant) {
+    if (!this.firstDone) { this.firstDone = true; this.announce('firstFinish', p); }
+    if (p.bot && this.authority) { this.say(p, 'finish', 0.9); if (Math.random() < 0.5) this.honk(p, true); }
   }
 
   applyBump(slot: number, ix: number, iz: number) {
@@ -389,6 +572,7 @@ export class Game {
     if (p.done) return;
     p.done = true; p.finishTime = time;
     if (p === this.local) { this.sfx.finish(); this.flash(`CHECKED OUT! ${time.toFixed(2)}s`, '#ffd23a'); }
+    this.onFinished(p);
     if (this.net && !p.remote) this.net.event({ e: 'fin', slot: p.slot, time });
   }
 
@@ -451,6 +635,9 @@ export class Game {
     this.updateCamera(dt);
     this.world.update(dt, time, this.camera);
     this.guides.update(dt, time);
+    this.popups.update(dt);
+    if (this.pa) { this.pa.t -= dt; if (this.pa.t <= 0) this.pa = null; }
+    if (this.phase === 'race') this.announcer.tick(dt, this.simTime);
     // shadow camera follows the player
     const ct = this.local.cart.model.root.position;
     this.sun.position.set(ct.x + 8, 20, ct.z + 6); this.sun.target.position.set(ct.x, 0, ct.z);
@@ -506,6 +693,7 @@ export class Game {
       for (const mat of mats) { for (const v of Object.values(mat)) if (v instanceof THREE.Texture && v !== this.envMap) v.dispose(); mat.dispose(); }
     });
     this.phys.free();
+    this.popups.dispose();
     this.sfx.stopLoops();
   }
 }

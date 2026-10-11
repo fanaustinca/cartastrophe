@@ -627,6 +627,120 @@ await T('a wrecked shelf restocks itself after a minute: upright, products back,
   await E(() => CART.view(null));
 });
 
+console.log('\nComedy: chaos, store PA, trash talk, horns, receipt, challenges');
+/** Ram the middle shelf of the store at sprint speed (same setup as the topple test). */
+const ramShelf = () => E(() => {
+  const w = CART.game.world, sh = w.shelves.shelves[Math.floor(w.shelves.shelves.length / 2)], p = sh.body.translation();
+  CART.teleport(p.x - 1.75, p.z, Math.PI / 2);
+  CART.game.local.cart.body.setLinvel({ x: 9.4, y: 0, z: 0 }, true);
+  CART.setInput({ throttle: 1, sprint: true });
+  for (let i = 0; i < 200; i++) { if (i === 30) CART.setInput({ throttle: -1 }); if (i === 60) CART.setInput(null); CART.advance(1 / 60); }
+  return [p.x, p.z];
+});
+
+await T('chaos: flattening a shelf books the damages, pops price tags, builds a combo and the PA calls it out', async () => {
+  await solo('bullseye', 5, 0);
+  await E(() => { CART.advance(3); CART.game.announcer.rand = () => 0; }); // past the opening announcement; no dice
+  const [x, z] = await ramShelf();
+  const r = await E(() => {
+    CART.render();
+    const c = CART.game.local.chaos;
+    return { shelves: c.shelves, damage: c.damage, style: c.style, best: c.bestCombo, eggs: c.smashed.eggs ?? 0, pa: CART.game.pa?.text ?? '', popups: CART.game.popups.group.children.length,
+      hud: document.getElementById('h-combo').classList.contains('hidden') ? '' : document.getElementById('h-combo').textContent, paHud: document.querySelector('#h-pa span').textContent };
+  });
+  assert(r.shelves === 1, 'shelf not credited: ' + JSON.stringify(r));
+  assert(r.damage >= 1299 && r.style >= r.damage, 'damages not booked: ' + JSON.stringify(r));
+  assert(r.popups > 0, 'no floating price tags');
+  assert(r.best >= 2, 'falling stock should chain a combo: ' + JSON.stringify(r));
+  assert(r.pa.length > 10 && r.paHud === r.pa, 'the PA did not announce the wreck: ' + JSON.stringify(r));
+  assert(r.hud.includes('damages'), 'HUD chaos meter missing: ' + r.hud);
+  await E(([x, z]) => CART.view([x - 5, 3, z + 4, x, 0.8, z]), [x, z]);
+  await shot(page, '14-chaos.png');
+  await E(() => CART.view(null));
+});
+
+await T('results: an itemised damage receipt, awards, daily challenges and a shopper rank', async () => {
+  await solo('bullseye', 5, 0);
+  await ramShelf();
+  const xp0 = await E(() => CART.profile.xp);
+  await E(() => { CART.dev('finish'); CART.dev('time 0'); CART.advance(1); });
+  await page.waitForFunction(() => document.getElementById('results').classList.contains('show'), { timeout: 20000 });
+  const r = await E(() => ({ receipt: document.getElementById('r-receipt').textContent, awards: document.getElementById('r-awards').textContent, daily: document.querySelectorAll('#r-daily .c').length, xp: CART.profile.xp, day: CART.profile.daily.day }));
+  assert(r.receipt.includes('SHELVING UNIT') && r.receipt.includes('TOTAL DAMAGES') && r.receipt.includes('CHAOS BONUS'), 'receipt: ' + r.receipt);
+  assert(r.awards.includes('Wrecking Ball'), 'awards: ' + r.awards);
+  assert(r.daily === 3, `daily challenges shown: ${r.daily}`);
+  assert(r.xp > xp0, 'no XP for the race');
+  await page.screenshot({ path: 'tests/screenshots/15-receipt.png' });
+  // challenge bookkeeping: progress adds up across races, "best" ones take the max, each pays once
+  const d = await E(() => {
+    const F = CART.fun, st = { day: '2026-01-01', prog: {}, claimed: [] }, ch = F.dailyChallenges(st.day);
+    const big = { ...F.newChaos(), shelves: 9, bumps: 30, honks: 50, bestCombo: 9, spins: 9, drops: 9, style: 99999, topSpeed: 20, smashed: { eggs: 20, tv: 5 } };
+    const a = F.progressDaily(st, { chaos: big, place: 1, done: true, store: 'x', storeName: 'x', players: 8 }).length;
+    const b = F.progressDaily(st, { chaos: big, place: 1, done: true, store: 'x', storeName: 'x', players: 8 }).length;
+    return { n: ch.length, ids: ch.map((c) => c.id), again: F.dailyChallenges('2026-01-01').map((c) => c.id), a, b, claimed: st.claimed.length };
+  });
+  assert(d.n === 3 && new Set(d.ids).size === 3 && JSON.stringify(d.ids) === JSON.stringify(d.again), 'daily set: ' + JSON.stringify(d));
+  // a maxed-out race completes everything except "N races" ones (which need several races), and never pays twice
+  assert(d.claimed >= 1 && d.b <= 3 - d.a && d.claimed === d.a + d.b, 'daily progress: ' + JSON.stringify(d));
+  const ranks = await E(() => [0, 199, 200, 99999].map((x) => CART.fun.rankOf(x).rank).concat(CART.fun.RANKS.length - 1));
+  assert(ranks[0] === 0 && ranks[1] === 0 && ranks[2] === 1 && ranks[3] === ranks[4], 'ranks: ' + ranks);
+});
+
+await T('horns: a honk startles the bot in front (it jumps and yells); bumping a bot makes it complain', async () => {
+  await solo('safely', 99, 1);
+  const r = await E(() => {
+    const g = CART.game, bot = g.players[1], me = g.local;
+    g.botsFrozen = true;
+    const b = bot.cart.body.translation(), yaw = bot.cart.yaw;
+    CART.teleport(b.x - Math.sin(yaw) * 3, b.z - Math.cos(yaw) * 3, yaw);
+    CART.advance(0.5);
+    const rnd = Math.random; Math.random = () => 0.1;
+    let y0 = bot.cart.body.translation().y, maxY = y0;
+    CART.setInput({ honk: true });
+    for (let i = 0; i < 30; i++) { CART.advance(1 / 60); maxY = Math.max(maxY, bot.cart.body.translation().y); }
+    CART.setInput(null);
+    const said = bot.cart.model.bubbleText;
+    Math.random = rnd;
+    return { hop: maxY - y0, said, honks: me.chaos.honks };
+  });
+  assert(r.honks === 1, 'honk not counted: ' + JSON.stringify(r));
+  assert(r.hop > 0.08, 'bot did not jump: ' + JSON.stringify(r));
+  assert(r.said.length > 0, 'bot said nothing: ' + JSON.stringify(r));
+  await solo('safely', 99, 1);
+  const b = await E(() => {
+    const g = CART.game, bot = g.players[1], me = g.local;
+    g.botsFrozen = true;
+    const p = bot.cart.body.translation(), yaw = bot.cart.yaw;
+    CART.teleport(p.x - Math.sin(yaw) * 2.6, p.z - Math.cos(yaw) * 2.6, yaw);
+    me.cart.body.setLinvel({ x: Math.sin(yaw) * 6, y: 0, z: Math.cos(yaw) * 6 }, true);
+    const rnd = Math.random; Math.random = () => 0.1;
+    CART.setInput({ throttle: 1 });
+    let said = '';
+    for (let i = 0; i < 60; i++) { CART.advance(1 / 60); said ||= bot.cart.model.bubbleText; }
+    CART.setInput(null);
+    Math.random = rnd;
+    return { bumps: me.chaos.bumps, bumped: bot.chaos.bumped, said };
+  });
+  assert(b.bumps === 1 && b.bumped === 1, 'bump not counted once: ' + JSON.stringify(b));
+  assert(b.said.length > 0, 'bumped bot said nothing: ' + JSON.stringify(b));
+  await E(() => { const bot = CART.game.players[1], t = bot.cart.body.translation(); CART.view([t.x + 2.5, 2.6, t.z + 2.5, t.x, 1.7, t.z]); });
+  await shot(page, '16-trash-talk.png');
+  await E(() => CART.view(null));
+});
+
+await T('hats and horns: buy, equip, the shopper wears it, and bots dress up too', async () => {
+  await E(() => { CART.dev('coupons 3000'); CART.garage('hat'); });
+  await page.click('#g-items .card[data-id="hat:crown"] button:last-child');
+  await E(() => CART.garage('horn'));
+  await page.click('#g-items .card[data-id="horn:goat"] button:last-child');
+  const r = await E(() => ({ c: CART.profile.custom, hat: CART.garageCart().hatId, owned: CART.profile.owned.filter((o) => o.startsWith('hat:') || o.startsWith('horn:')) }));
+  assert(r.c.hat === 'crown' && r.c.horn === 'goat' && r.hat === 'crown', 'not equipped: ' + JSON.stringify(r));
+  await solo('safely', 7, 7);
+  const bots = await E(() => CART.game.players.filter((p) => p.bot).map((p) => p.info.custom.hat));
+  assert(bots.every((h) => typeof h === 'string') && new Set(bots).size >= 2, 'bots should wear assorted hats: ' + bots);
+  await E(() => CART.equip({ hat: 'cap', horn: 'bell' }));
+});
+
 console.log('\nMultiplayer (P2P protocol over BroadcastChannel)');
 async function mpTest(query, maxErr) {
   const small = { width: 640, height: 360 };

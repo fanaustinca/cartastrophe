@@ -10,8 +10,8 @@ import { nameTagTexture } from './textures';
 import { itemGeometry, itemMaterial } from './items';
 import type { Hazards } from './hazards';
 
-export interface CartInput { throttle: number; steer: number; sprint: boolean; ride: boolean; nitro: boolean; action: boolean }
-export const NO_INPUT: CartInput = { throttle: 0, steer: 0, sprint: false, ride: false, nitro: false, action: false };
+export interface CartInput { throttle: number; steer: number; sprint: boolean; ride: boolean; nitro: boolean; action: boolean; honk: boolean }
+export const NO_INPUT: CartInput = { throttle: 0, steer: 0, sprint: false, ride: false, nitro: false, action: false, honk: false };
 
 export const CART = { halfW: 0.29, halfL: 0.46, mass: 100, handleZ: -0.5 };
 
@@ -161,6 +161,76 @@ function addonModel(id: string): THREE.Group {
   return g;
 }
 
+/** Headwear, sat on top of the shopper's head (origin = crown of the head). */
+function hatModel(id: string, shirt: THREE.Material, cartMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0) => { const o = mesh(geo, m, x, y, z); g.add(o); return o; };
+  const half = (r: number) => new THREE.SphereGeometry(r, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  switch (id) {
+    case 'none': break;
+    case 'cone': add(new THREE.ConeGeometry(0.12, 0.36, 16), std(0xff6010), 0, 0.15); add(new THREE.CylinderGeometry(0.075, 0.09, 0.05, 16), std(0xf4f4f4), 0, 0.14); add(new THREE.BoxGeometry(0.3, 0.02, 0.3), std(0xff6010), 0, -0.02); break;
+    case 'party': add(new THREE.ConeGeometry(0.085, 0.28, 14), std(0xe030c0), 0, 0.12); add(new THREE.SphereGeometry(0.035, 8, 6), std(0xffe020), 0, 0.27); break;
+    case 'chef': add(new THREE.CylinderGeometry(0.12, 0.115, 0.15, 16), std(0xfafafa, { roughness: 0.9 }), 0, 0.05); add(new THREE.SphereGeometry(0.16, 14, 10).scale(1, 0.7, 1), std(0xfafafa, { roughness: 0.9 }), 0, 0.16); break;
+    case 'propeller': {
+      add(half(0.14), std(0xe02020), 0, -0.04);
+      add(new THREE.CylinderGeometry(0.008, 0.008, 0.08, 6), std(0x333333), 0, 0.12);
+      const p = new THREE.Group(); p.position.y = 0.16;
+      p.add(mesh(new THREE.BoxGeometry(0.3, 0.008, 0.05), std(0x2060ff)), mesh(new THREE.BoxGeometry(0.05, 0.008, 0.3), std(0xffd020)));
+      g.add(p); g.userData.spin = p; break;
+    }
+    case 'cowboy': add(new THREE.CylinderGeometry(0.27, 0.27, 0.015, 24), std(0x7a4a22, { roughness: 0.9 }), 0, 0); add(new THREE.CylinderGeometry(0.11, 0.13, 0.15, 16), std(0x7a4a22, { roughness: 0.9 }), 0, 0.075); add(new THREE.CylinderGeometry(0.131, 0.131, 0.03, 16), std(0x2a1a0a), 0, 0.02); break;
+    case 'tinfoil': { const m = std(0xd8dce4, { metalness: 1, roughness: 0.35, flatShading: true }); add(new THREE.ConeGeometry(0.16, 0.26, 7), m, 0, 0.1); add(new THREE.CylinderGeometry(0.17, 0.17, 0.02, 7), m, 0, -0.02); break; }
+    case 'viking': {
+      add(half(0.145), std(0x8a8e96, { metalness: 0.8, roughness: 0.35 }), 0, -0.04);
+      for (const s of [-1, 1]) { const h = add(new THREE.ConeGeometry(0.035, 0.18, 10), std(0xf2ead0), s * 0.17, 0.05); h.rotation.z = -s * 0.9; }
+      break;
+    }
+    case 'tophat': add(new THREE.CylinderGeometry(0.11, 0.11, 0.27, 18), std(0x141418, { roughness: 0.4 }), 0, 0.135); add(new THREE.CylinderGeometry(0.2, 0.2, 0.015, 24), std(0x141418), 0, 0); add(new THREE.CylinderGeometry(0.112, 0.112, 0.04, 18), std(0xc02020), 0, 0.04); break;
+    case 'fish': {
+      const m = std(0x8ab0c8, { metalness: 0.6, roughness: 0.3 });
+      add(new THREE.SphereGeometry(0.1, 14, 10).scale(2.2, 0.75, 0.6), m, 0, 0.05);
+      const t = add(new THREE.ConeGeometry(0.08, 0.12, 4), m, -0.27, 0.05); t.rotation.z = Math.PI / 2;
+      for (const z of [-0.05, 0.05]) add(new THREE.SphereGeometry(0.014, 6, 4), std(0x101010), 0.17, 0.07, z);
+      break;
+    }
+    case 'duck': add(new THREE.SphereGeometry(0.1, 14, 10).scale(1.15, 0.85, 1), std(0xffd420), 0, 0.06); add(new THREE.SphereGeometry(0.065, 12, 8), std(0xffd420), 0, 0.17, 0.06); add(new THREE.ConeGeometry(0.03, 0.08, 8).rotateX(Math.PI / 2), std(0xff7a10), 0, 0.165, 0.14); for (const x of [-0.03, 0.03]) add(new THREE.SphereGeometry(0.011, 6, 4), std(0x101010), x, 0.19, 0.115); break;
+    case 'crown': {
+      const m = std(0xffc830, { metalness: 1, roughness: 0.2 });
+      add(new THREE.CylinderGeometry(0.125, 0.115, 0.08, 16, 1, true), m, 0, 0.03).material = m;
+      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; add(new THREE.ConeGeometry(0.025, 0.07, 6), m, Math.sin(a) * 0.12, 0.1, Math.cos(a) * 0.12); }
+      add(new THREE.SphereGeometry(0.022, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff1040, emissive: 0x600010 }), 0, 0.04, 0.125);
+      break;
+    }
+    case 'cart': { const c = mesh(_frameLo.g!, cartMat); c.scale.setScalar(0.3); c.position.set(0, -0.11, 0); g.add(c); break; }
+    default: add(new THREE.CylinderGeometry(0.135, 0.14, 0.07, 12), shirt, 0, -0.02); add(new THREE.BoxGeometry(0.2, 0.015, 0.12), shirt, 0, -0.05, 0.13);
+  }
+  return g;
+}
+
+/** Comic speech bubble with a tail, word-wrapped to at most 3 lines. */
+function bubbleTexture(text: string): { tex: THREE.CanvasTexture; aspect: number } {
+  const c = document.createElement('canvas'), g = c.getContext('2d')!;
+  const font = '800 34px Arial, sans-serif';
+  g.font = font;
+  const words = text.split(' '), lines: string[] = [];
+  let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (g.measureText(t).width > 380 && cur) { lines.push(cur); cur = w; } else cur = t; }
+  lines.push(cur);
+  const L = lines.slice(0, 3);
+  const w = Math.min(420, Math.max(...L.map((l) => g.measureText(l).width))) + 48, h = L.length * 40 + 34 + 26;
+  c.width = Math.ceil(w); c.height = h;
+  g.font = font;
+  g.fillStyle = '#ffffff'; g.strokeStyle = '#111'; g.lineWidth = 5;
+  g.beginPath(); g.roundRect(4, 4, w - 8, h - 30, 22); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(w / 2 - 14, h - 28); g.lineTo(w / 2, h - 4); g.lineTo(w / 2 + 14, h - 28); g.closePath(); g.fill(); g.stroke();
+  g.fillRect(w / 2 - 12, h - 34, 24, 8);
+  g.fillStyle = '#111'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  L.forEach((l, i) => g.fillText(l, w / 2, 24 + i * 40 + 6, w - 30));
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { tex, aspect: w / h };
+}
+
 function flameMaterial() { return new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }); }
 
 export class CartModel {
@@ -181,6 +251,12 @@ export class CartModel {
   avatar: THREE.Group | null = null;
   hands: THREE.Group | null = null;
   tag: THREE.Sprite | null = null;
+  bubble: THREE.Sprite | null = null;
+  bubbleText = '';
+  private bubbleT = 0;
+  private hat: THREE.Group | null = null;
+  private hatId = '';
+  private shirtMat: THREE.Material | null = null;
   addon: THREE.Group | null = null;
   motor: THREE.Group;
   flames: THREE.Mesh[] = [];
@@ -284,6 +360,13 @@ export class CartModel {
     this.neon.visible = this.neonStrip.visible = neon.color !== null;
     if (neon.color !== null) { this.neonMat.color.setHex(neon.color); (this.neonStrip.material as THREE.MeshBasicMaterial).color.setHex(neon.color); }
     this.motor.visible = c.engine === 'electric';
+    if (this.avatar && c.hat !== this.hatId) {
+      this.hatId = c.hat;
+      if (this.hat) { this.avatar.remove(this.hat); this.hat.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.geometry !== _frameLo.g) m.geometry.dispose(); }); }
+      this.hat = hatModel(c.hat, this.shirtMat!, this.skinMat);
+      this.hat.position.set(0, 1.84, 0.02);
+      this.avatar.add(this.hat);
+    }
     const key = `${c.body}|${c.wheel}|${c.addon}`;
     if (key !== this.builtKey) { this.builtKey = key; this.build(); }
   }
@@ -384,6 +467,26 @@ export class CartModel {
     this.root.add(this.tag);
   }
 
+  /** Pop a speech bubble over the shopper's head for a couple of seconds. */
+  speak(text: string, dur = 2.6) {
+    this.clearBubble();
+    const { tex, aspect } = bubbleTexture(text);
+    this.bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    this.bubble.renderOrder = 900;
+    this.bubble.center.set(0.5, 0);
+    this.bubble.userData.aspect = aspect;
+    this.bubble.userData.dur = dur;
+    this.bubbleText = text;
+    this.bubbleT = dur;
+    this.root.add(this.bubble);
+  }
+  private clearBubble() {
+    if (!this.bubble) return;
+    this.root.remove(this.bubble);
+    const m = this.bubble.material as THREE.SpriteMaterial; m.map?.dispose(); m.dispose();
+    this.bubble = null; this.bubbleText = '';
+  }
+
   private buildAvatar(color: number) {
     const a = new THREE.Group();
     const shirt = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
@@ -391,9 +494,8 @@ export class CartModel {
     const pants = new THREE.MeshStandardMaterial({ color: 0x2a3550, roughness: 0.9 });
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.42, 4, 8), shirt); torso.position.set(0, 1.25, 0); torso.castShadow = true;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), skin); head.position.set(0, 1.72, 0.02); head.castShadow = true;
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.14, 0.07, 12), shirt); hat.position.set(0, 1.82, 0.02);
-    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.015, 0.12), shirt); brim.position.set(0, 1.79, 0.15);
-    a.add(torso, head, hat, brim);
+    this.shirtMat = shirt;
+    a.add(torso, head);
     for (const s of [-1, 1]) {
       const leg = new THREE.Group(); leg.position.set(s * 0.09, 0.92, 0);
       const lm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.68, 3, 6), pants); lm.position.y = -0.44; lm.castShadow = true;
@@ -465,6 +567,19 @@ export class CartModel {
     if (boosting) this.flameMat.color.copy(hsl(0.06 + Math.random() * 0.05, 1, 0.55));
     const spin = this.addon?.userData.spin as THREE.Object3D | undefined;
     if (spin) spin.rotation.y += dt * 25;
+    const prop = this.hat?.userData.spin as THREE.Object3D | undefined;
+    if (prop) prop.rotation.y += dt * (3 + Math.abs(speed) * 5);
+    if (this.bubble) {
+      this.bubbleT -= dt;
+      if (this.bubbleT <= 0) this.clearBubble();
+      else {
+        const age = this.bubble.userData.dur - this.bubbleT, pop = Math.min(1, age * 7) * (1 + Math.max(0, 0.15 - age) * 2);
+        const h = 0.5 * pop, b = this.body, top = this.tag ? this.tag.position.y + 0.2 : Math.max(2.15 * this.avatarScale, this.lift + 1.0 * b.sy + 1.1);
+        this.bubble.scale.set(h * this.bubble.userData.aspect, h, 1);
+        this.bubble.position.set(0, top, this.tag ? this.tag.position.z : -0.55 * b.sz - 0.4);
+        (this.bubble.material as THREE.SpriteMaterial).opacity = Math.min(1, this.bubbleT * 3);
+      }
+    }
 
     // stacked carts sway with cornering (centripetal) and braking/accelerating
     if (this.body.levels > 1 && dt > 0) {
@@ -491,6 +606,7 @@ export class CartModel {
   }
 
   dispose() {
+    this.clearBubble();
     this.tower?.dispose();
     this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.geometry !== _frameHi.g && m.geometry !== _frameLo.g) m.geometry.dispose(); });
   }

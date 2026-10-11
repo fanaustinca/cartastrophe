@@ -8,12 +8,13 @@ import { Sfx } from './audio';
 import { Session, randomCustom, sanitize } from './session';
 import { lobbyCode, LocalTransport } from './net';
 import { loadProfile, saveProfile, Profile, CATEGORIES, Category } from './save';
-import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName, BODIES, UPGRADES, MAX_LEVEL, upgradePrice, cartStats, TRIMS } from './config';
+import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName, BODIES, UPGRADES, MAX_LEVEL, upgradePrice, cartStats, TRIMS, HATS, HORNS } from './config';
 import { CartModel, NO_INPUT } from './cart';
 import { Restock } from './restock';
 import { ShelfSystem } from './shelves';
 import { logoTexture } from './textures';
 import { thumbCanvas, thumbUrl } from './thumbs';
+import * as fun from './fun';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
@@ -27,6 +28,7 @@ let profile: Profile = loadProfile(params.has('fresh'));
 const sfx = new Sfx();
 sfx.enabled = !TEST;
 sfx.setVolume(profile.volume);
+sfx.voice = profile.voice;
 const hud = new Hud();
 
 // ---------------- renderer ----------------
@@ -118,6 +120,8 @@ function titleScreen() {
   show('title');
   hud.show(false);
   $('coupons').textContent = String(profile.coupons);
+  renderRank();
+  renderDaily($('daily'), []);
   renderStores($('store-pick'), selectedStore, (id) => { selectedStore = id; titleScreen(); });
   const join = params.get('join');
   if (join && !$<HTMLInputElement>('join-code').value) $<HTMLInputElement>('join-code').value = join;
@@ -145,6 +149,20 @@ $('btn-join').onclick = async () => {
 };
 $('btn-garage').onclick = () => garageScreen('body');
 $('btn-settings').onclick = settingsScreen;
+
+function renderRank() {
+  const r = fun.rankOf(profile.xp);
+  $('rank').innerHTML = `Rank ${r.rank + 1}: <b>${r.name}</b>` + (r.need ? ` · ${r.into}/${r.need} XP<div class="bar"><div style="width:${(r.into / r.need) * 100}%"></div></div>` : ' · max rank!');
+}
+function renderDaily(el: HTMLElement, fresh: string[]) {
+  if (profile.daily.day !== fun.today()) profile.daily = { day: fun.today(), prog: {}, claimed: [] };
+  const d = profile.daily;
+  el.innerHTML = '<div class="t">📋 TODAY\'S CHALLENGES</div>' + fun.dailyChallenges(d.day).map((c) => {
+    const done = d.claimed.includes(c.id), v = Math.min(c.goal, d.prog[c.id] ?? 0);
+    const fmt = (n: number) => c.id === 'damage' ? '$' + n.toLocaleString('en-US') : String(n);
+    return `<div class="c ${done ? 'done' : ''} ${fresh.includes(c.id) ? 'new' : ''}" data-id="${c.id}"><span>${done ? '✅' : '⬜'} ${c.text}</span><span class="p">${done ? 'done' : `${fmt(v)}/${fmt(c.goal)}`}</span><span>🎟 ${c.reward}</span></div>`;
+  }).join('');
+}
 
 function lobbyScreen() {
   if (!session) return titleScreen();
@@ -178,7 +196,9 @@ function wireSession(s: Session) {
 }
 
 // ---------------- garage / shop ----------------
-const LABELS: Record<Category, string> = { body: '🛒 Carts', wheel: '🛞 Wheels', addon: '🧲 Add-ons', engine: '⚡ Engine & Nitro', skin: '🎨 Paint', trim: '🎀 Trim', neon: '💡 Neon', squeak: '🔊 Squeaks' };
+const LABELS: Record<Category, string> = { body: '🛒 Carts', wheel: '🛞 Wheels', addon: '🧲 Add-ons', engine: '⚡ Engine & Nitro', skin: '🎨 Paint', trim: '🎀 Trim', neon: '💡 Neon', squeak: '🔊 Squeaks', hat: '🎩 Hats', horn: '📯 Horns' };
+const HAT_ICON: Record<string, string> = { cap: '🧢', none: '👨‍🦲', cone: '🚧', party: '🥳', chef: '👨‍🍳', propeller: '🚁', cowboy: '🤠', tinfoil: '🛸', viking: '⚔️', tophat: '🎩', fish: '🐟', duck: '🦆', crown: '👑', cart: '🛒' };
+const HORN_ICON: Record<string, string> = { bell: '🔔', squeaky: '🧸', clown: '🤡', duck: '🦆', goat: '🐐', trombone: '🎺', air: '📢', cucaracha: '🪳', train: '🚂' };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const RAINBOW = 'linear-gradient(90deg,red,orange,yellow,lime,cyan,blue,magenta)';
 function swatch(cat: Category, id: string): string {
@@ -192,6 +212,8 @@ function swatch(cat: Category, id: string): string {
     if (n.color === null) return '<div class="sw" style="background:#222"></div>';
     return `<div class="sw" style="background:${n.rainbow ? RAINBOW : n.police ? 'linear-gradient(90deg,#ff1010 50%,#1040ff 50%)' : hex(n.color)};box-shadow:0 0 14px ${hex(n.color)}"></div>`;
   }
+  if (cat === 'hat') return `<div class="ic">${HAT_ICON[id] ?? '🎩'}</div>`;
+  if (cat === 'horn') return `<div class="ic">${HORN_ICON[id] ?? '📯'}</div>`;
   if (cat === 'trim') return `<div class="sw" style="background:${hex(TRIMS.find((x) => x.id === id)!.color)}"></div>`;
   if (cat === 'wheel') return `<div class="sw" style="background:${hex(WHEELS.find((x) => x.id === id)!.color)}"></div>`;
   return '';
@@ -236,9 +258,10 @@ function garageScreen(cat: Category) {
       if (!owned) { profile.coupons -= it.price; profile.owned.push(key); sfx.pickup(); }
       (profile.custom as unknown as Record<string, string>)[cat] = it.id;
       if (cat === 'squeak') { sfx.unlock(); sfx.squeak(it.id, 1.5); }
+      if (cat === 'horn') { sfx.unlock(); sfx.horn(it.id); }
       saveProfile(profile); refreshGarageCart(); garageScreen(cat);
     };
-    if (cat === 'squeak') { const p = document.createElement('button'); p.textContent = '▶ Preview'; p.className = 'small'; p.onclick = () => { sfx.unlock(); sfx.squeak(it.id, 1.5); }; card.appendChild(p); }
+    if (cat === 'squeak' || cat === 'horn') { const p = document.createElement('button'); p.textContent = '▶ Preview'; p.className = 'small'; p.onclick = () => { sfx.unlock(); if (cat === 'horn') sfx.horn(it.id); else sfx.squeak(it.id, 1.5); }; card.appendChild(p); }
     card.appendChild(b);
     grid.appendChild(card);
   }
@@ -269,6 +292,7 @@ function settingsScreen() {
   $<HTMLInputElement>('s-name').value = profile.name;
   $<HTMLSelectElement>('s-quality').value = profile.quality;
   $<HTMLInputElement>('s-volume').value = String(profile.volume);
+  $<HTMLInputElement>('s-voice').checked = profile.voice;
 }
 $('btn-settings-back').onclick = () => {
   profile.name = $<HTMLInputElement>('s-name').value.trim().slice(0, 16) || profile.name;
@@ -277,6 +301,7 @@ $('btn-settings-back').onclick = () => {
   profile.quality = q;
   profile.volume = Number($<HTMLInputElement>('s-volume').value);
   sfx.setVolume(profile.volume);
+  profile.voice = sfx.voice = $<HTMLInputElement>('s-voice').checked;
   saveProfile(profile);
   if (reload) location.reload(); else titleScreen();
 };
@@ -326,17 +351,35 @@ const REWARD = [150, 110, 90, 70, 55, 45, 35, 25];
 function resultsScreen(rows: ResultRow[]) {
   if (!game) return;
   const me = rows.find((r) => r.slot === game!.localSlot)!;
-  const earned = REWARD[me.place - 1] + me.items * 5;
-  profile.coupons += earned;
+  const g = game, lp = g.local, ch = lp.chaos, store = STORE_BY_ID[g.cfg.storeId];
+  const bonus = fun.chaosBonus(ch);
+  let earned = REWARD[me.place - 1] + me.items * 5 + bonus;
   profile.races++;
-  if (me.done) { const b = profile.best[game.cfg.storeId]; if (!b || me.time < b) profile.best[game.cfg.storeId] = me.time; }
+  if (me.done) { const b = profile.best[g.cfg.storeId]; if (!b || me.time < b) profile.best[g.cfg.storeId] = me.time; }
+  // daily challenges
+  if (profile.daily.day !== fun.today()) profile.daily = { day: fun.today(), prog: {}, claimed: [] };
+  const fresh = fun.progressDaily(profile.daily, { chaos: ch, place: me.place, done: me.done, store: g.cfg.storeId, storeName: store.name, players: rows.length });
+  for (const c of fresh) earned += c.reward;
+  // shopper rank
+  const before = fun.rankOf(profile.xp);
+  profile.xp += 40 + Math.max(0, 8 - me.place) * 10 + me.items * 3 + Math.min(80, Math.round(ch.style / 60)) + fresh.length * 50;
+  const after = fun.rankOf(profile.xp);
+  const promoted = after.rank > before.rank;
+  if (promoted) for (let r = before.rank + 1; r <= after.rank; r++) earned += fun.rankReward(r);
+  profile.coupons += earned;
   saveProfile(profile);
   hud.show(false);
   show('results');
+  sfx.hushVoice();
+  $('r-receipt').innerHTML = fun.receiptHtml(ch, { name: lp.info.name, store: store.name, place: me.place, time: me.time, done: me.done, bonus });
+  const aw = fun.awards(g.players.map((p) => ({ name: p.info.name, chaos: p.chaos, done: p.done })));
+  $('r-awards').innerHTML = aw.map((a) => `<div>${a.icon} <b>${a.title}</b> — ${a.who}<br><i>${a.what}</i></div>`).join('');
+  renderDaily($('r-daily'), fresh.map((c) => c.id));
+  if (fresh.length) sfx.finish();
   $('r-title').textContent = me.place === 1 ? '🏆 Shopper of the Year!' : `You placed ${me.place}${['st', 'nd', 'rd'][me.place - 1] ?? 'th'}`;
   $('r-table').innerHTML = '<tr><th>#</th><th>Shopper</th><th>Time</th><th>Items</th></tr>' + rows.map((r) => `<tr class="${r.slot === me.slot ? 'me' : ''}"><td>${r.place}</td><td><span style="color:${hex(r.color)}">●</span> ${r.name}${r.bot ? ' 🤖' : ''}</td><td>${r.done ? r.time.toFixed(2) + 's' : 'DNF'}</td><td>${r.items}</td></tr>`).join('');
   const best = profile.best[game.cfg.storeId];
-  $('r-reward').textContent = `+${earned} coupons (🎟 ${profile.coupons})` + (best ? ` · best here: ${best.toFixed(2)}s` : '');
+  $('r-reward').innerHTML = `+${earned} coupons (🎟 ${profile.coupons})` + (best ? ` · best here: ${best.toFixed(2)}s` : '') + (promoted ? `<br><b style="color:var(--yellow)">⭐ PROMOTED to ${after.name}! +${fun.rankReward(after.rank)} bonus coupons</b>` : ` · ${after.name} ${after.into}/${after.need} XP`);
   $('btn-again').textContent = session ? 'Back to Lobby' : 'Race Again';
 }
 $('btn-again').onclick = () => {
@@ -361,6 +404,11 @@ cart <type>      swap carts mid-race: ${BODIES.map((b) => b.id).join(' ')}
 restock          restock every wrecked shelf right now
 freeze           pause / unpause the bots
 topple           knock every shelf over (chaos)
+pa [event]       make the store PA announce something (${Object.keys(fun.PA).join(' ')})
+honk             honk your horn
+say <text>       every other shopper says <text>
+xp <n>           add shopper-rank XP
+daily            leave today's challenges one step from done
 help             this list`;
 function devLog(s: string) { const o = $('dev-out'); o.textContent += s + '\n'; o.scrollTop = o.scrollHeight; }
 function devRun(line: string): string {
@@ -428,6 +476,18 @@ function devRun(line: string): string {
       for (const sh of gg.world.shelves.shelves) { const t = sh.body.translation(); sh.body.applyImpulseAtPoint({ x: (Math.random() - 0.5) * 900, y: 0, z: (Math.random() - 0.5) * 900 }, { x: t.x, y: t.y + 2, z: t.z }, true); }
       return 'timber!';
     }
+    case 'pa': {
+      const gg = needGame(), ev = (args[0] ?? 'ambient') as fun.PaEvent;
+      if (!fun.PA[ev]) throw new Error('usage: pa ' + Object.keys(fun.PA).join('|'));
+      const t = gg.local.cart.body.translation();
+      const text = gg.announcer.line(ev, { name: gg.local.info.name, where: gg.world.whereIs(t.x, t.z), store: gg.world.def.name });
+      gg.pa = { text, t: 6.5 }; sfx.chime(); sfx.speak(text);
+      return '📢 ' + text;
+    }
+    case 'honk': { const gg = needGame(); gg.local.honkT = -9; gg.honk(gg.local, true); return 'HONK'; }
+    case 'say': { const gg = needGame(), t = args.join(' ') || 'I want to speak to your manager!'; for (const p of gg.players) if (p !== gg.local) p.cart.model.speak(t); return `everyone says "${t}"`; }
+    case 'xp': { const n = Number(args[0] ?? 500); profile.xp = Math.max(0, profile.xp + (Number.isFinite(n) ? n : 0)); refresh(); renderRank(); const r = fun.rankOf(profile.xp); return `${profile.xp} XP — ${r.name}`; }
+    case 'daily': { for (const c of fun.dailyChallenges(profile.daily.day)) if (!profile.daily.claimed.includes(c.id)) profile.daily.prog[c.id] = c.best ? 0 : c.goal - 1; refresh(); return 'today\'s challenges are one step from done'; }
     default: throw new Error(`unknown command "${cmd}" — type help`);
   }
 }
@@ -476,6 +536,7 @@ function readInput() {
   inp.ride = k('Space');
   inp.nitro = k('KeyE');
   inp.action = k('KeyQ');
+  inp.honk = k('KeyH');
   const pad = navigator.getGamepads?.()[0];
   if (pad) {
     const ax = pad.axes[0] ?? 0;
@@ -486,6 +547,7 @@ function readInput() {
     if (pad.buttons[2]?.pressed || pad.buttons[10]?.pressed) inp.sprint = true;
     if (pad.buttons[1]?.pressed || pad.buttons[5]?.pressed) inp.nitro = true;
     if (pad.buttons[3]?.pressed || pad.buttons[4]?.pressed) inp.action = true;
+    if (pad.buttons[12]?.pressed || pad.buttons[11]?.pressed) inp.honk = true;
   }
 }
 
@@ -562,7 +624,7 @@ const api = {
     game.frame(0);
   },
   render: () => { if (game) { game.frame(0); hud.update(game, 1, fps); renderer.render(game.scene, game.camera); } else renderer.render(garageScene, garageCam); },
-  setInput: (inp: { throttle?: number; steer?: number; sprint?: boolean; ride?: boolean; nitro?: boolean; action?: boolean } | null) => {
+  setInput: (inp: { throttle?: number; steer?: number; sprint?: boolean; ride?: boolean; nitro?: boolean; action?: boolean; honk?: boolean } | null) => {
     if (!game) return;
     game.inputOverride = inp ? { ...NO_INPUT, ...inp } : null;
   },
@@ -624,10 +686,11 @@ const api = {
   garageCart: () => garageCart,
   tuneRestock: Restock,
   reloadProfile: () => { profile = loadProfile(); return profile; },
-  catalog: { WHEELS, SKINS, NEONS, BODIES, UPGRADES, CATEGORIES },
+  catalog: { WHEELS, SKINS, NEONS, BODIES, UPGRADES, CATEGORIES, HATS, HORNS },
   RAPIER,
   dev: (cmd: string) => devRun(cmd),
   tune: { ShelfSystem, Game },
+  fun,
   thumbs: () => ITEM_KINDS.map((k) => [k.id, thumbUrl(renderer, k.id)]),
 };
 (window as unknown as { CART: typeof api }).CART = api;

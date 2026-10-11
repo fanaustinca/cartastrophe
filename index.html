@@ -25,8 +25,10 @@
     </div>
     <div id="store-pick" class="stores"></div>
     <div class="wallet">🎟 <b id="coupons">0</b> coupons</div>
+    <div id="rank" class="rank"></div>
+    <div id="daily" class="daily"></div>
     <div id="title-err" class="err"></div>
-    <div class="help">WASD / arrows drive · Shift sprint · E nitro · Q add-on · Space hop on &amp; ride (drift) · C camera · M store map · R reset · Esc pause · ` dev console</div>
+    <div class="help">WASD / arrows drive · Shift sprint · E nitro · Q add-on · H horn · Space hop on &amp; ride (drift) · C camera · M store map · R reset · Esc pause · ` dev console</div>
   </div>
 
   <div id="lobby" class="screen">
@@ -53,6 +55,7 @@
     <label>Name <input id="s-name" maxlength="16" /></label>
     <label>Graphics <select id="s-quality"><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
     <label>Volume <input id="s-volume" type="range" min="0" max="1" step="0.05" /></label>
+    <label class="check"><input id="s-voice" type="checkbox" /> Store PA reads announcements aloud</label>
     <div class="menu row"><button id="btn-settings-back">Back</button></div>
   </div>
 
@@ -74,6 +77,8 @@
     <canvas id="h-map" width="230" height="230"></canvas>
     <div id="h-bigwrap" class="hidden"><div class="t">STORE MAP <small>(M to close)</small></div><canvas id="h-bigmap"></canvas></div>
     <div id="h-fps"></div>
+    <div id="h-pa" class="hidden"><b>📢 ATTENTION SHOPPERS</b><span></span></div>
+    <div id="h-combo" class="hidden"><div class="x"></div><div class="d"></div></div>
   </div>
 
   <div id="dev" class="hidden"><div id="dev-out"></div><input id="dev-in" placeholder="dev command — type help" autocomplete="off" spellcheck="false" /></div>
@@ -85,7 +90,14 @@
 
   <div id="results" class="screen">
     <h2 id="r-title">Results</h2>
-    <table id="r-table"></table>
+    <div class="r-wrap">
+      <div class="r-left">
+        <table id="r-table"></table>
+        <div id="r-awards" class="awards"></div>
+      </div>
+      <div id="r-receipt" class="receipt"></div>
+    </div>
+    <div id="r-daily" class="daily"></div>
     <div id="r-reward" class="sub"></div>
     <div class="menu row"><button id="btn-again" class="big">Race Again</button><button id="btn-menu">Menu</button></div>
   </div>
