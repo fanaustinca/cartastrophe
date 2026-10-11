@@ -124,9 +124,20 @@ export interface HornDef { id: string; name: string; desc: string; price: number
  * (how much a full basket slows you), topple (ram speed needed to tip a shelf); grab/reach are
  * the pick-up radius and highest shelf you can reach (m).
  */
-export interface BodyDef { id: string; name: string; desc: string; price: number; sx: number; sy: number; sz: number; levels: number; mass: number; speed: number; accel: number; steer: number; cargo: number; topple: number; grab: number; reach: number }
+export interface BodyDef {
+  id: string; name: string; desc: string; price: number; sx: number; sy: number; sz: number; levels: number; mass: number; speed: number; accel: number; steer: number; cargo: number; topple: number; grab: number; reach: number;
+  /** Carts nested one inside the next, front to back (the Ground-Scraper). */
+  nest?: number;
+  /** Carts towed behind the shopper, following their path (the Choo-Choo). */
+  train?: number;
+}
+/** Nested carts sit this far apart (m). */
+export const NEST_PITCH = 0.06;
+/** Extra length a body has beyond one basket (nested carts); the body stays centred on it. */
+export const bodyTail = (b: BodyDef) => (b.nest ? (b.nest - 1) * NEST_PITCH : 0);
 export interface AddonDef { id: string; name: string; desc: string; price: number }
-export interface EngineDef { id: string; name: string; desc: string; price: number }
+/** speed / accel: multipliers while the engine is fitted; ride: how hard it pulls while you ride (Space). */
+export interface EngineDef { id: string; name: string; desc: string; price: number; speed: number; accel: number; ride: number }
 export interface UpgradeDef { id: UpgradeId; name: string; desc: string; price: number; motor?: boolean }
 export type UpgradeId = 'mSpeed' | 'mAccel' | 'mTorque' | 'nPower' | 'nCap' | 'nRecharge';
 export const MAX_LEVEL = 5;
@@ -140,6 +151,8 @@ export const BODIES: BodyDef[] = [
   B({ id: 'wide', name: 'Ultra-Wide Hauler', desc: 'Plows the whole aisle and grabs from both sides.', price: 400, sx: 2.3, mass: 1.4, speed: 0.97, accel: 0.92, steer: 0.85, grab: 2.0 }),
   B({ id: 'limo', name: 'Stretch Limo', desc: 'Ultra long, stable and classy. Hates corners.', price: 600, sz: 2.2, mass: 1.5, speed: 1.08, accel: 0.95, steer: 0.7, cargo: 0.5, grab: 1.7 }),
   B({ id: 'giant', name: 'Mega Cart', desc: 'Ultra big. Bulldozes shelves at a jog.', price: 800, sx: 1.75, sy: 1.75, sz: 1.75, mass: 2.4, speed: 1.03, accel: 0.9, steer: 0.8, cargo: 0.6, topple: 0.8, grab: 2.0, reach: 3.2 }),
+  B({ id: 'groundscraper', name: 'Ground-Scraper 100', desc: 'The Sky-Scraper 100, but it fell over. One hundred nested carts, four hundred wheels, one turning circle the size of a parking lot.', price: 2800, nest: 100, mass: 2.2, speed: 1.1, accel: 0.82, steer: 0.55, cargo: 0.4, topple: 0.7, grab: 2.1 }),
+  B({ id: 'train', name: 'The Choo-Choo', desc: 'You, a smokestack, and nine carts that follow you everywhere. Like ducklings. Heavy, metal ducklings.', price: 2000, train: 9, mass: 1.3, speed: 1.02, accel: 0.9, steer: 0.95, cargo: 0.45, grab: 1.6 }),
   B({ id: 'tower', name: 'Sky-Scraper 100', desc: 'One hundred carts tall. Grabs anything. Sways like a palm tree.', price: 2500, levels: 100, mass: 1.6, speed: 0.92, accel: 0.85, steer: 0.78, grab: 1.6, reach: 99 }),
 ];
 export const WHEELS: WheelDef[] = [
@@ -163,8 +176,10 @@ export const ADDONS: AddonDef[] = [
   { id: 'ram', name: 'Battering Ram', desc: 'Sends rivals flying; shrugs off their bumps.', price: 450 },
 ];
 export const ENGINES: EngineDef[] = [
-  { id: 'none', name: 'Leg Power', desc: 'You push. You sweat.', price: 0 },
-  { id: 'electric', name: 'Electric Motor', desc: 'Faster, punchier, and keeps driving while you ride (Space). Upgradable below.', price: 1200 },
+  { id: 'none', name: 'Leg Power', desc: 'You push. You sweat.', price: 0, speed: 1, accel: 1, ride: 0 },
+  { id: 'gas', name: 'Lawnmower Engine', desc: 'Pulled off a 1987 lawnmower. Loud, smoky, smells like summer. A bit faster, and putters along while you ride. Upgradable below.', price: 600, speed: 1.04, accel: 1.1, ride: 2.6 },
+  { id: 'electric', name: 'Electric Motor', desc: 'Faster, punchier, and keeps driving while you ride (Space). Upgradable below.', price: 1200, speed: 1.08, accel: 1.2, ride: 3.4 },
+  { id: 'rocket', name: 'Surplus Rocket', desc: 'An actual rocket, strapped on with zip ties. The fastest thing in retail. Permanently on fire. Upgradable below.', price: 3000, speed: 1.18, accel: 1.42, ride: 4.6 },
 ];
 export const UPGRADES: UpgradeDef[] = [
   { id: 'mSpeed', name: 'Motor · Top Speed', desc: '+5% top speed per level', price: 220, motor: true },
@@ -268,7 +283,7 @@ export const DEFAULT_CUSTOM: Customization = { wheel: 'caster', skin: 'chrome', 
 
 /** Everything a cart's physics needs from its parts and upgrades. */
 export interface CartStats {
-  body: BodyDef; wheel: WheelDef; addon: string; motor: boolean;
+  body: BodyDef; wheel: WheelDef; addon: string; motor: boolean; engine: EngineDef; ride: number;
   speed: number; accel: number; steer: number; torque: number; cargo: number;
   grab: number; reach: number; mass: number; topple: number;
   nitroCap: number; nitroPower: number; nitroRegen: number;
@@ -277,11 +292,12 @@ export function cartStats(c: Customization): CartStats {
   const body = BODIES.find((b) => b.id === c.body) ?? BODIES[0];
   const wheel = WHEELS.find((w) => w.id === c.wheel) ?? WHEELS[0];
   const up = { ...NO_UPGRADES, ...c.up };
-  const motor = c.engine === 'electric';
+  const engine = ENGINES.find((e) => e.id === c.engine) ?? ENGINES[0];
+  const motor = engine.id !== 'none';
   return {
-    body, wheel, addon: c.addon, motor,
-    speed: body.speed * wheel.speed * (motor ? 1.08 + 0.05 * up.mSpeed : 1),
-    accel: body.accel * (motor ? 1.2 + 0.12 * up.mAccel : 1),
+    body, wheel, addon: c.addon, motor, engine, ride: engine.ride,
+    speed: body.speed * wheel.speed * (motor ? engine.speed + 0.05 * up.mSpeed : 1),
+    accel: body.accel * (motor ? engine.accel + 0.12 * up.mAccel : 1),
     steer: body.steer,
     torque: motor ? 1 + up.mTorque : 0,
     cargo: body.cargo * (motor ? 1 - 0.12 * up.mTorque : 1),

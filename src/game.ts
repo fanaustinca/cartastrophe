@@ -6,7 +6,7 @@ import { StoreWorld } from './store';
 import { Cart, CartModel, CART, CartInput, NO_INPUT } from './cart';
 import { Bot } from './bots';
 import { Interpolator, Snap, Clock } from './net';
-import { Customization, KIND_BY_ID, STORE_BY_ID, LIST_SIZE, MESS, INTERP_DELAY } from './config';
+import { Customization, KIND_BY_ID, STORE_BY_ID, LIST_SIZE, MESS, INTERP_DELAY, bodyTail } from './config';
 import { Rng } from './rng';
 import { Guides } from './guides';
 import { Restock } from './restock';
@@ -172,8 +172,10 @@ export class Game {
     // a cart is simulated (dynamic) where its owner lives: local player, or bots on the host
     const remote = !isLocal && !(info.bot && this.authority);
     const model = new CartModel(info.custom, { local: isLocal, avatarColor: info.color, name: isLocal ? undefined : info.name, envMap: this.envMap });
-    const cart = new Cart(this.phys, model, new THREE.Vector3(sp.x, 0.05, sp.z), sp.yaw, remote);
-    model.root.position.set(sp.x, 0, sp.z);
+    // a long cart starts pulled forward so its tail clears the wall behind the start line
+    const h = bodyTail(model.body) / 2, x0 = sp.x + Math.sin(sp.yaw) * h, z0 = sp.z + Math.cos(sp.yaw) * h;
+    const cart = new Cart(this.phys, model, new THREE.Vector3(x0, 0.05, z0), sp.yaw, remote);
+    model.root.position.set(x0, 0, z0);
     this.scene.add(model.root);
     const p = new Participant(info, cart, remote);
     if (remote) { p.interp = new Interpolator(); for (const c of cart.colliders) this.remoteColliders.set(c.handle, p); }
@@ -225,8 +227,11 @@ export class Game {
       if (n !== this.lastCount && n >= 0) { this.lastCount = n; if (n > 0) this.sfx.beep(false); this.onCountdownTick?.(n); }
       if (this.countdown <= 0) {
         this.phase = 'race'; this.sfx.beep(true); this.flash('GO! GO! GO!', '#7aff7a');
+        // a ridiculous cart in the race gets called out at the start (the tallest first)
         const tower = this.players.find((p) => p.cart.stats.body.levels > 50);
-        this.announce(tower ? 'tower' : 'start', tower);
+        const train = this.players.find((p) => p.cart.stats.body.train);
+        const nest = this.players.find((p) => p.cart.stats.body.nest);
+        this.announce(tower ? 'tower' : nest ? 'long' : train && Math.random() < 0.6 ? 'train' : 'start', tower ?? nest ?? train ?? null);
       }
     } else if (this.phase === 'race') {
       this.raceTime += dt;

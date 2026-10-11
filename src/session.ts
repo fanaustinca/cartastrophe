@@ -206,7 +206,7 @@ export function sanitize(c: Partial<Customization> | undefined): Customization {
 export function randomCustom(): Customization {
   const p = <T extends { id: string }>(l: T[]) => l[Math.floor(Math.random() * l.length)].id;
   const r = Math.random();
-  const body = r < 0.5 ? 'standard' : r < 0.97 ? p(BODIES.filter((b) => b.id !== 'tower')) : 'tower';
+  const body = r < 0.5 ? 'standard' : r < 0.97 ? p(BODIES.filter((b) => b.id !== 'tower' && b.id !== 'groundscraper')) : 'tower';
   const up: Upgrades = { ...NO_UPGRADES, nPower: Math.floor(Math.random() * 3), nCap: Math.floor(Math.random() * 3) };
-  return { wheel: p(WHEELS), skin: p(SKINS), neon: p(NEONS), squeak: p(SQUEAKS), trim: p(TRIMS), body, addon: p(ADDONS), engine: 'none', hat: p(HATS), horn: p(HORNS), up };
+  return { wheel: p(WHEELS), skin: p(SKINS), neon: p(NEONS), squeak: p(SQUEAKS), trim: p(TRIMS), body, addon: p(ADDONS), engine: Math.random() < 0.15 ? 'gas' : 'none', hat: p(HATS), horn: p(HORNS), up };
 }

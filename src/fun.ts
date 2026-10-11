@@ -112,7 +112,7 @@ export function awards(players: { name: string; chaos: Chaos; done: boolean }[])
 }
 
 // ---------------- store PA ----------------
-export type PaEvent = 'start' | 'tower' | 'shelf' | 'egg' | 'oil' | 'milk' | 'soda' | 'mayo' | 'spin' | 'bump' | 'drop' | 'restock' | 'last30' | 'firstFinish' | 'combo' | 'ambient' | 'honk' | 'flung';
+export type PaEvent = 'start' | 'tower' | 'train' | 'long' | 'shelf' | 'egg' | 'oil' | 'milk' | 'soda' | 'mayo' | 'spin' | 'bump' | 'drop' | 'restock' | 'last30' | 'firstFinish' | 'combo' | 'ambient' | 'honk' | 'flung';
 export const PA: Record<PaEvent, string[]> = {
   start: [
     'Welcome to {store}. Today\'s special: chaos. Shop responsibly. Or don\'t.',
@@ -125,6 +125,17 @@ export const PA: Record<PaEvent, string[]> = {
     'Will the owner of the hundred-storey cart please mind the ceiling fans.',
     'Store management has been informed there is a skyscraper in the building. Inside the building.',
     'Whoever brought the hundred-level cart: we do not have a permit for that.',
+  ],
+  train: [
+    'Attention shoppers: a train is now boarding in the store. We do not have a train. Please stand clear of the train.',
+    '{name} has brought nine carts and a smokestack. All aboard, apparently.',
+    'Choo choo, {name}. Choo choo.',
+    'The nine-thirty to checkout is departing. Driver: {name}. Passengers: none. Cargo: concerning.',
+  ],
+  long: [
+    '{name} has nested one hundred carts together. We needed those carts.',
+    'Attention: there is a cart in the store that is longer than the store. Mind the corners. All of them.',
+    'Would the driver of the one-hundred-cart convoy please signal before turning. And start turning now.',
   ],
   shelf: [
     'Clean-up in {where}. Bring the big mop. And a forklift.',
@@ -263,7 +274,7 @@ export const STORE_PA: Record<string, Partial<Record<PaEvent, string[]>>> = {
     ambient: ['Price check on prunes, aisle two. Not for Hal. For a friend.', 'Reminder: we still take cheques. Nobody has written one since two thousand and four.', 'Hal is not retiring. Hal will never retire. Hal is the store now.', 'Our produce is fresh daily. Our jokes are fresh nineteen sixty-one.', 'If you see a hearing aid on the floor, that is Hal\'s. Please speak up.'],
   },
 };
-const PRIORITY: Partial<Record<PaEvent, number>> = { start: 3, firstFinish: 3, last30: 3, tower: 2, shelf: 2, combo: 2 };
+const PRIORITY: Partial<Record<PaEvent, number>> = { start: 3, train: 3, long: 3, firstFinish: 3, last30: 3, tower: 2, shelf: 2, combo: 2 };
 
 /** Picks lines without repeating, rate-limits the PA, and hands each line to `out`. */
 export class Announcer {

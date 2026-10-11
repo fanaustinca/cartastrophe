@@ -497,7 +497,7 @@ async function dragRace(custom, input, sec = 1.6) {
   await E((c) => CART.equip({ wheel: 'caster', body: 'standard', addon: 'none', engine: 'none', up: { mSpeed: 0, mAccel: 0, mTorque: 0, nPower: 0, nCap: 0, nRecharge: 0 }, ...c }), custom);
   await solo('safely', 99, 0);
   const lane = await E(() => CART.game.world.spawns[3]);
-  await E(([x, z]) => CART.teleport(x, z, Math.PI), [lane.x, lane.z]);
+  await E(([x, z]) => CART.teleport(x, z - CART.game.local.cart.model.half, Math.PI), [lane.x, lane.z]); // long carts: tail clear of the wall
   await E((i) => { CART.setInput({ throttle: 1, sprint: true, ...i }); }, input);
   await E((sec) => CART.advance(sec), sec);
   const st = await E(() => ({ ...CART.state(), nitro: CART.game.local.cart.nitro, nitroOn: CART.game.local.cart.nitroOn, cap: CART.game.local.cart.stats.nitroCap, mass: CART.game.local.cart.body.mass() }));
@@ -519,6 +519,56 @@ await T('cart bodies: every one builds, drives, and has its size / weight / leve
   await E(() => CART.setCam('chase'));
   await shot(page, '12-tower-cart.png');
   await E(() => CART.setCam('fp'));
+});
+
+await T('custom cart models: wide / limo are built (not stretched), the Ground-Scraper nests 100 carts, the Choo-Choo tows 9 that follow your path', async () => {
+  const m = await E(() => {
+    const out = {};
+    for (const b of ['wide', 'limo', 'giant', 'groundscraper', 'train']) {
+      CART.equip({ body: b }); const g = CART.garageCart(), s = g.chassis.scale;
+      const inst = g.root.children.flatMap((o) => o.children ?? []).filter((o) => o.isInstancedMesh).map((o) => o.count);
+      out[b] = { uniform: Math.abs(s.x - s.y) < 1e-6 && Math.abs(s.z - s.y) < 1e-6, wheels: g.wheels.length, inst };
+    }
+    CART.equip({ body: 'standard' });
+    return out;
+  });
+  for (const b of ['wide', 'limo', 'giant']) assert(m[b].uniform, `${b} is stretched: ` + JSON.stringify(m[b]));
+  assert(m.wide.wheels === 6 && m.limo.wheels === 6, 'wide / limo should get extra wheels: ' + JSON.stringify(m));
+  assert(m.groundscraper.inst.includes(99) && m.groundscraper.inst.includes(396), 'nested carts / wheels: ' + JSON.stringify(m.groundscraper));
+  assert(m.train.inst.includes(9) && m.train.inst.includes(36), 'towed carts: ' + JSON.stringify(m.train));
+  // drive the train round a corner: every towed cart sits on (near) the leader's own path, a cart-gap apart
+  await E(() => CART.equip({ body: 'train', engine: 'none' }));
+  await solo('safely', 99, 0);
+  const r = await E(() => {
+    const c = CART.game.local.cart, path = [];
+    CART.setInput({ throttle: 1, sprint: true });
+    for (let i = 0; i < 240; i++) {
+      if (i === 70) CART.setInput({ throttle: 1, steer: 0.7 });
+      if (i === 120) CART.setInput({ throttle: 1 });
+      CART.advance(1 / 60);
+      const t = c.body.translation(); path.push([t.x, t.z]);
+    }
+    CART.setInput(null);
+    const cars = c.trail.cars, near = (q) => Math.min(...path.map(([x, z]) => Math.hypot(x - q.x, z - q.z)));
+    const gaps = cars.slice(1).map((q, i) => Math.hypot(q.x - cars[i].x, q.z - cars[i].z));
+    const t = c.body.translation();
+    return { n: cars.length, off: Math.max(...cars.slice(0, 3).map(near)), gaps, lead: Math.hypot(cars[0].x - t.x, cars[0].z - t.z), bodies: c.towBodies.length, moved: Math.hypot(t.x - path[0][0], t.z - path[0][1]) };
+  });
+  assert(r.n === 9 && r.bodies === 9, 'nine towed carts with physics: ' + JSON.stringify(r));
+  assert(r.moved > 8, 'the train should drive: ' + JSON.stringify(r));
+  assert(r.off < 0.3, 'the first carts should follow the leader\'s path: ' + JSON.stringify(r));
+  assert(r.lead > 1.2 && r.lead < 2.6, 'first cart should be just behind the shopper: ' + JSON.stringify(r));
+  await E(() => CART.setCam('chase')); await E(() => CART.render());
+  await shot(page, '16-choo-choo.png');
+  await E(() => CART.setCam('fp'));
+});
+
+await T('engines: legs < lawnmower < electric < rocket, and the rocket drives you while you ride', async () => {
+  const sp = {};
+  for (const e of ['none', 'gas', 'electric', 'rocket']) { await dragRace({ engine: e }, {}, 0.05); sp[e] = await E(() => { const s = CART.game.local.cart.stats; return s.speed * s.accel; }); }
+  assert(sp.none < sp.gas && sp.gas < sp.electric && sp.electric < sp.rocket, 'engine order: ' + JSON.stringify(sp));
+  const ride = await dragRace({ engine: 'rocket' }, { sprint: false, ride: true }, 1.2);
+  assert(ride.speed > 4, 'the rocket should drive you while you ride: ' + ride.speed);
 });
 
 await T('nitro (E) and the electric motor make you faster; the Nitro Tank holds twice as much', async () => {

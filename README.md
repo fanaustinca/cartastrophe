@@ -62,7 +62,7 @@ Press **`** (backtick) anywhere and type `help`.
 |---|---|
 | `coupons [n]` | add coupons (default 10000) |
 | `unlock` | own everything in the garage |
-| `max` | electric motor plus every upgrade at level 5 |
+| `max` | every engine (the rocket fitted) plus every upgrade at level 5 |
 | `cart <type>` | swap carts mid-race (`standard double triple mini wide limo giant tower`) |
 | `nitro` | refill the nitro tank (and dropper charges) |
 | `restock` | restock every wrecked shelf right now |
@@ -84,10 +84,14 @@ You earn coupons for each race based on your placing and items collected. Spend 
   - Standard
   - **Double Decker** and **Triple Stack** (stacked carts that reach the top shelves)
   - **Micro Cart** (ultra small, twitchy, easy to shove)
-  - **Ultra-Wide Hauler** (grabs from both sides)
-  - **Stretch Limo**
-  - **Mega Cart** (ultra big; bulldozes shelves at a jog)
+  - **Ultra-Wide Hauler** (grabs from both sides; a double-width basket with a divider, six wheels and a WIDE LOAD sign)
+  - **Stretch Limo** (a long basket with a third axle, gold pinstripes, a hood ornament and two little flags)
+  - **Mega Cart** (ultra big, with a bumper; bulldozes shelves at a jog)
   - **Sky-Scraper 100**: a hundred carts tall, sways in the corners, and reaches every shelf.
+  - **Ground-Scraper 100**: the Sky-Scraper, but it fell over. A hundred carts nested in a row (four hundred wheels, an amber beacon, an OVERSIZE LOAD sign). Fast in a straight line; corners are a group decision.
+  - **The Choo-Choo**: you, a smokestack and a cowcatcher, towing nine carts on a rope. They follow your exact path (so they take corners the way you did), push loose stock aside, and jackknife when you back up.
+
+  Every cart has its own model: the wide and long ones are built at their size (more wires at the same spacing) rather than a standard basket stretched.
 - **Wheels**:
   - **Zero-Slip Treads**: no slipping on oil, yolk, milk or mayo.
   - Ice Skates, Bubblegum Rollers (sticky soda can't slow them), knobbies, Mag-Lev, Monster Truck wheels and Rocket Bearings.
@@ -98,13 +102,13 @@ You earn coupons for each race based on your placing and items collected. Spend 
   - **Item Magnet**: grabs from much further away.
   - **Battering Ram**: sends rivals flying and shrugs off their bumps.
 - **Engine & Nitro**:
-  - The **Electric Motor** is faster, punchier, and keeps driving while you ride.
+  - Three engines, all of which keep driving while you ride: the **Lawnmower Engine** (a bit faster; rattles and puffs smoke), the **Electric Motor** (faster, punchier), and the **Surplus Rocket** (the fastest thing in retail, permanently on fire).
   - Upgrade top speed, acceleration and torque, plus nitro power, capacity and recharge (5 levels each).
 - **Paint** (20 finishes, including animated lava, galaxy, mall-cop lights and a see-through ghost cart), **trim colors**, **neon underglow** and **squeak sounds** (now including Dolphin, Whoopee Cushion and Baby Laugh).
 - **Hats** for your shopper: traffic cone, chef's toque, a propeller beanie that spins faster the faster you go, viking helmet, tinfoil hat, a whole fish, a rubber duck, the Coupon Crown, and a tiny shopping cart.
 - **Horns** (see above).
 
-Bots get random carts too. Most are sensible, but now and then one shows up in a triple stack or a Sky-Scraper.
+Bots get random carts too. Most are sensible, but now and then one shows up in a triple stack, on a train, or in a Sky-Scraper, and some have a lawnmower engine.
 
 ## Tech
 - **Three.js** rendering and **Rapier** (WASM) physics, written in TypeScript and bundled with Vite.
@@ -159,7 +163,7 @@ Puppeteer loads the built game in headless Chromium (SwiftShader WebGL) and:
 - checks performance budgets (draw calls, triangles, physics ms/step), pool recycling and LOD;
 - buys and equips from the shop, then checks the purchase survives a reload;
 - renders every garage tab, buys a cart, an add-on, the motor and upgrades (exact coupon math), and migrates an old-format save;
-- drives every cart body (size, weight, stacked levels); checks that nitro, the electric motor (also while riding) and the Nitro Tank do what they say; Zero-Slip Treads don't spin on oil but casters do; the Mop-Vac clears a puddle and the Oil Dropper leaves one;
+- drives every cart body (size, weight, stacked levels); checks the custom models (wide and limo aren't stretched and have extra wheels, the Ground-Scraper's 99 nested carts, the Choo-Choo's towed carts staying on the leader's path); checks the engine order (legs < lawnmower < electric < rocket); checks that nitro, the electric motor (also while riding) and the Nitro Tank do what they say; Zero-Slip Treads don't spin on oil but casters do; the Mop-Vac clears a puddle and the Oil Dropper leaves one;
 - wrecks a shelf and checks it restocks after a minute: it waits while a cart is parked next to it, then the shelf is upright and back home, every product is back, its puddles are gone, and everything settles back to sleep;
 - renders at medium quality with shadows on and fails on any GL draw error (that's how the empty-shelves bug got through: the suite ran on low quality only);
 - flattens a shelf and checks the comedy layer: damages are booked to the rammer, price tags pop, the combo builds, the PA announces it and the HUD shows it; each store has a distinct announcer (name, voice settings, chime and lines), and Best Buyout's robot is the one actually talking; the results show the itemised receipt, awards, daily challenges and XP; challenge and rank bookkeeping; a honk makes the bot in front jump and yell, and a bump is counted once and makes the bot complain; hats and horns can be bought and worn, and bots wear assorted hats;

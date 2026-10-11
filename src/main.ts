@@ -8,7 +8,7 @@ import { Sfx } from './audio';
 import { Session, randomCustom, sanitize } from './session';
 import { lobbyCode, LocalTransport } from './net';
 import { loadProfile, saveProfile, Profile, CATEGORIES, Category } from './save';
-import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName, BODIES, UPGRADES, MAX_LEVEL, upgradePrice, cartStats, TRIMS, HATS, HORNS } from './config';
+import { STORES, STORE_BY_ID, BOT_NAMES, RACE_TIME, Customization, WHEELS, SKINS, NEONS, ITEM_KINDS, kindName, BODIES, UPGRADES, MAX_LEVEL, upgradePrice, cartStats, TRIMS, HATS, HORNS, ENGINES, bodyTail } from './config';
 import { CartModel, NO_INPUT } from './cart';
 import { Restock } from './restock';
 import { ShelfSystem } from './shelves';
@@ -78,7 +78,7 @@ function refreshGarageCart() {
   const b = BODIES.find((x) => x.id === profile.custom.body) ?? BODIES[0];
   if (b.levels > 4) { garageCam.position.set(6.5, 3.2, 8.2); garageCam.lookAt(0, 3.4, 0); }
   else {
-    const k = Math.max(b.sx, b.sz * 0.8, b.sy, 1 + (b.levels - 1) * 0.45);
+    const k = Math.max(b.sx, b.sz * 0.8, b.sy, 1 + (b.levels - 1) * 0.45, (0.92 + bodyTail(b)) * 0.6, b.train ? 3.4 : 0);
     garageCam.position.set(2.6 * (0.55 + 0.45 * k), 1.7 * (0.6 + 0.4 * k), 3.2 * (0.55 + 0.45 * k));
     garageCam.lookAt(0, 0.7 * (0.5 + 0.5 * Math.max(b.sy, 1 + (b.levels - 1) * 0.8)), 0);
   }
@@ -229,7 +229,7 @@ function cardStats(cat: Category, id: string): string {
 }
 function garageStats() {
   const S = cartStats(profile.custom);
-  $('g-stats').innerHTML = `<b>Your cart</b> · top speed ${pct(S.speed)} · accel ${pct(S.accel)} · steering ${pct(S.steer)} · weight ${pct(S.mass)} · nitro ${S.nitroCap.toFixed(1)} s @ ${pct(S.nitroPower)}${S.motor ? ' · ⚡ motor' : ''}`;
+  $('g-stats').innerHTML = `<b>Your cart</b> · top speed ${pct(S.speed)} · accel ${pct(S.accel)} · steering ${pct(S.steer)} · weight ${pct(S.mass)} · nitro ${S.nitroCap.toFixed(1)} s @ ${pct(S.nitroPower)}${S.motor ? ` · ${S.engine.id === 'rocket' ? '🚀' : S.engine.id === 'gas' ? '⛽' : '⚡'} ${S.engine.name.toLowerCase()} (motor)` : ''}`;
 }
 function garageScreen(cat: Category) {
   show('garage');
@@ -268,7 +268,7 @@ function garageScreen(cat: Category) {
   if (cat === 'engine') {
     const h = document.createElement('div'); h.className = 'shop-h'; h.textContent = 'Upgrades (kept forever, stack up to level 5)';
     grid.appendChild(h);
-    const hasMotor = profile.owned.includes('engine:electric');
+    const hasMotor = ENGINES.some((e) => e.id !== 'none' && profile.owned.includes('engine:' + e.id));
     for (const u of UPGRADES) {
       const lvl = profile.custom.up[u.id] ?? 0, price = upgradePrice(u, lvl);
       const card = document.createElement('div');
@@ -277,7 +277,7 @@ function garageScreen(cat: Category) {
       card.innerHTML = `<b>${u.name}</b><div class="pips">${Array.from({ length: MAX_LEVEL }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('')}</div><div class="desc">${u.desc}</div>`;
       const b = document.createElement('button');
       const locked = u.motor && !hasMotor;
-      b.textContent = lvl >= MAX_LEVEL ? 'MAXED' : locked ? '🔒 Needs the Electric Motor' : `Upgrade to ${lvl + 1} · 🎟 ${price}`;
+      b.textContent = lvl >= MAX_LEVEL ? 'MAXED' : locked ? '🔒 Needs an engine' : `Upgrade to ${lvl + 1} · 🎟 ${price}`;
       b.disabled = lvl >= MAX_LEVEL || !!locked || profile.coupons < price;
       b.onclick = () => { profile.coupons -= price; profile.custom.up[u.id] = lvl + 1; sfx.pickup(); saveProfile(profile); refreshGarageCart(); garageScreen(cat); };
       card.appendChild(b);
@@ -399,7 +399,7 @@ finish           check out right now
 time <sec>       set the race clock's time left
 tp <item|checkout>  teleport next to the nearest <item> on your list, or a checkout
 nitro            refill your nitro tank
-max              every upgrade to level 5 (and the motor)
+max              every upgrade to level 5 (and the rocket)
 cart <type>      swap carts mid-race: ${BODIES.map((b) => b.id).join(' ')}
 restock          restock every wrecked shelf right now
 freeze           pause / unpause the bots
@@ -451,10 +451,10 @@ function devRun(line: string): string {
     case 'nitro': { const c = needGame().local.cart; c.nitro = c.stats.nitroCap; c.charges = 4; return `nitro full (${c.nitro.toFixed(1)} s)`; }
     case 'max': {
       for (const u of UPGRADES) profile.custom.up[u.id] = MAX_LEVEL;
-      if (!profile.owned.includes('engine:electric')) profile.owned.push('engine:electric');
-      profile.custom.engine = 'electric';
+      for (const e of ENGINES) if (!profile.owned.includes('engine:' + e.id)) profile.owned.push('engine:' + e.id);
+      profile.custom.engine = 'rocket';
       refresh(); if (g) g.local.cart.setCustom(sanitize(profile.custom));
-      return 'electric motor + every upgrade at level 5';
+      return 'surplus rocket + every upgrade at level 5';
     }
     case 'cart': case 'body': {
       const b = BODIES.find((x) => x.id === (args[0] ?? '').toLowerCase() || x.name.toLowerCase().includes((args.join(' ') || '?').toLowerCase()));

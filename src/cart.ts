@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RAPIER, Physics, G, groups, ALL } from './physics';
-import { Customization, WHEELS, SKINS, NEONS, TRIMS, BODIES, WheelDef, BodyDef, SkinDef, NeonDef, KIND_BY_ID, CartStats, cartStats } from './config';
+import { Customization, WHEELS, SKINS, NEONS, TRIMS, BODIES, WheelDef, BodyDef, SkinDef, NeonDef, KIND_BY_ID, CartStats, cartStats, bodyTail, NEST_PITCH } from './config';
 import { nameTagTexture } from './textures';
 import { itemGeometry, itemMaterial } from './items';
 import type { Hazards } from './hazards';
@@ -27,17 +27,22 @@ function bar(a: THREE.Vector3, b: THREE.Vector3, r: number, seg = 4) {
 }
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
-/** Basket corner profile: bottom narrower and lower at the front (nesting carts). */
-function basketCorners() {
+/** Basket corner profile: bottom narrower and lower at the front (nesting carts). w / l widen / lengthen it. */
+function basketCorners(w = 1, l = 1) {
   const yb = 0.42, yt = 0.98;
   return {
-    bfl: V(0.22, yb + 0.05, 0.42), bfr: V(-0.22, yb + 0.05, 0.42), bbl: V(0.25, yb, -0.4), bbr: V(-0.25, yb, -0.4),
-    tfl: V(0.27, yt - 0.02, 0.5), tfr: V(-0.27, yt - 0.02, 0.5), tbl: V(0.29, yt, -0.46), tbr: V(-0.29, yt, -0.46),
+    bfl: V(0.22 * w, yb + 0.05, 0.42 * l), bfr: V(-0.22 * w, yb + 0.05, 0.42 * l), bbl: V(0.25 * w, yb, -0.4 * l), bbr: V(-0.25 * w, yb, -0.4 * l),
+    tfl: V(0.27 * w, yt - 0.02, 0.5 * l), tfr: V(-0.27 * w, yt - 0.02, 0.5 * l), tbl: V(0.29 * w, yt, -0.46 * l), tbr: V(-0.29 * w, yt, -0.46 * l),
   };
 }
 
-function frameGeometry(hi: boolean): THREE.BufferGeometry {
-  const c = basketCorners();
+/**
+ * A wire basket w times as wide and l times as long as a standard one. Built for its size (more wires,
+ * same wire thickness and spacing) instead of scaling a standard basket, so a limo or a wide hauler
+ * looks made that way rather than stretched.
+ */
+function frameGeometry(hi: boolean, w = 1, l = 1): THREE.BufferGeometry {
+  const c = basketCorners(w, l);
   const parts: THREE.BufferGeometry[] = [];
   const r = 0.009;
   // rim and bottom outline
@@ -45,19 +50,20 @@ function frameGeometry(hi: boolean): THREE.BufferGeometry {
   for (const L of loops) for (let i = 0; i < 4; i++) parts.push(bar(L[i], L[(i + 1) % 4], r * 1.4));
   // vertical edges
   for (const [a, b] of [[c.bfl, c.tfl], [c.bfr, c.tfr], [c.bbl, c.tbl], [c.bbr, c.tbr]]) parts.push(bar(a, b, r * 1.4));
-  const n = hi ? 9 : 0;
   const lerp = (a: THREE.Vector3, b: THREE.Vector3, t: number) => a.clone().lerp(b, t);
-  for (let i = 1; i <= n; i++) {
-    const t = i / (n + 1);
+  const nl = hi ? Math.round(9 * l) : 0, nw = Math.round(6 * w);
+  for (let i = 1; i <= nl; i++) {
+    const t = i / (nl + 1);
     // side wires (vertical) left and right
     parts.push(bar(lerp(c.bbl, c.bfl, t), lerp(c.tbl, c.tfl, t), r));
     parts.push(bar(lerp(c.bbr, c.bfr, t), lerp(c.tbr, c.tfr, t), r));
-    // bottom grid along length
-    if (i % 2) parts.push(bar(lerp(c.bfl, c.bfr, t), lerp(c.bbl, c.bbr, t), r));
   }
   if (hi) {
-    for (let i = 1; i <= 6; i++) {
-      const t = i / 7;
+    // bottom grid along the length
+    const nb = Math.round(4 * w);
+    for (let i = 1; i <= nb; i++) { const t = i / (nb + 1); parts.push(bar(lerp(c.bfl, c.bfr, t), lerp(c.bbl, c.bbr, t), r)); }
+    for (let i = 1; i <= nw; i++) {
+      const t = i / (nw + 1);
       parts.push(bar(lerp(c.bfl, c.bfr, t), lerp(c.tfl, c.tfr, t), r)); // front wires
       parts.push(bar(lerp(c.bbl, c.bbr, t), lerp(c.tbl, c.tbr, t), r)); // back flap wires
     }
@@ -67,20 +73,41 @@ function frameGeometry(hi: boolean): THREE.BufferGeometry {
       parts.push(bar(lerp(c.bbr, c.tbr, t), lerp(c.bfr, c.tfr, t), r));
       parts.push(bar(lerp(c.bfl, c.tfl, t), lerp(c.bfr, c.tfr, t), r));
     }
-  } else {
-    // lo: cheap translucent-looking panels are in a separate mesh; frame only here
+    if (w > 1.6) {
+      // wide baskets get a divider down the middle (two carts' worth of basket, one cart's worth of decisions)
+      const f0 = lerp(c.bfl, c.bfr, 0.5), b0 = lerp(c.bbl, c.bbr, 0.5), f1 = lerp(c.tfl, c.tfr, 0.5), b1 = lerp(c.tbl, c.tbr, 0.5);
+      parts.push(bar(f1, b1, r * 1.4), bar(f0, f1, r * 1.4), bar(b0, b1, r * 1.4));
+      for (let i = 1; i <= Math.round(5 * l); i++) { const t = i / (Math.round(5 * l) + 1); parts.push(bar(lerp(b0, f0, t), lerp(b1, f1, t), r)); }
+    }
   }
-  // chassis: two rails from wheels up to basket, lower tray
-  for (const x of [0.2, -0.2]) {
-    parts.push(bar(V(x, 0.16, 0.38), V(x, 0.16, -0.36), r * 2.2));
-    parts.push(bar(V(x, 0.16, -0.36), V(x * 1.2, 0.42, -0.4), r * 2.2));
-    parts.push(bar(V(x * 1.2, 0.42, -0.4), V(x * 1.4, 1.0, -0.55), r * 2));
+  // chassis: rails from wheels up to basket, lower tray
+  const rails = w > 1.6 ? [0.2 * w, 0, -0.2 * w] : [0.2 * w, -0.2 * w];
+  for (const x of rails) {
+    parts.push(bar(V(x, 0.16, 0.38 * l), V(x, 0.16, -0.36 * l), r * 2.2));
+    if (!x) continue;
+    const ux = Math.sign(x) * (Math.abs(x) + 0.04);
+    parts.push(bar(V(x, 0.16, -0.36 * l), V(ux * 1.0, 0.42, -0.4 * l), r * 2.2));
+    parts.push(bar(V(ux, 0.42, -0.4 * l), V(Math.sign(x) * (Math.abs(x) + 0.08), 1.0, -0.4 * l - 0.15), r * 2));
   }
-  for (let i = 0; i <= (hi ? 6 : 2); i++) { const z = 0.34 - i * (0.68 / (hi ? 6 : 2)); parts.push(bar(V(0.2, 0.2, z), V(-0.2, 0.2, z), r)); }
+  if (l > 1.5) for (const x of [0.2 * w, -0.2 * w]) parts.push(bar(V(x, 0.16, 0), V(x * 1.15, 0.43, 0), r * 2)); // middle struts for the long ones
+  const nt = hi ? Math.round(6 * l) : 2;
+  for (let i = 0; i <= nt; i++) { const z = (0.34 - i * (0.68 / nt)) * l; parts.push(bar(V(0.2 * w, 0.2, z), V(-0.2 * w, 0.2, z), r)); }
   const g = mergeGeometries(parts, false)!;
   g.computeBoundingSphere();
   return g;
 }
+/** Shared geometry (cached, never disposed by a cart). */
+const SHARED = new WeakSet<THREE.BufferGeometry>();
+const _geo = new Map<string, THREE.BufferGeometry>();
+function shared(key: string, make: () => THREE.BufferGeometry) {
+  let g = _geo.get(key);
+  if (!g) { g = make(); _geo.set(key, g); SHARED.add(g); }
+  return g;
+}
+const frameGeo = (hi: boolean, w = 1, l = 1) => shared(`frame|${hi}|${w.toFixed(2)}|${l.toFixed(2)}`, () => frameGeometry(hi, w, l));
+const gripGeo = (w = 1) => shared(`grip|${w.toFixed(2)}`, () => new THREE.CylinderGeometry(0.02, 0.02, 0.4 * w + 0.22, 8).rotateZ(Math.PI / 2));
+/** Where the handle sits on a basket l times as long (chassis units). */
+const handleZ = (l = 1) => -(0.4 * l + 0.15);
 
 function wheelGeometry(w: WheelDef) {
   const parts: THREE.BufferGeometry[] = [];
@@ -104,12 +131,253 @@ function glowTexture() {
   return new THREE.CanvasTexture(c);
 }
 let _glowTex: THREE.Texture | null = null;
-const _frameHi = { g: null as THREE.BufferGeometry | null }, _frameLo = { g: null as THREE.BufferGeometry | null };
 
 /** Height of one stacked cart in a double / triple / 100-level tower (its rails sit on the rim below). */
 export const LEVEL_H = 0.82;
 const std = (color: number, o: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.5, ...o });
 const mesh = (g: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.castShadow = true; return o; };
+
+const _forkGeo = new THREE.BoxGeometry(0.012, 0.12, 0.05);
+const _ropeGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 5).rotateX(Math.PI / 2);
+const _ropeMat = new THREE.MeshStandardMaterial({ color: 0xc8a050, roughness: 0.9 });
+SHARED.add(_forkGeo); SHARED.add(_ropeGeo);
+/** The Choo-Choo's towed carts: first nose this far behind the leader's centre, then every `pitch` (m). */
+export const TRAIN = { lead: 1.45, len: 0.92, pitch: 1.22 };
+
+/** Wheel positions (root space, before the add-on) and which ones are swivelling casters. */
+export function wheelLayout(b: BodyDef): [number, number, boolean][] {
+  const h = bodyTail(b) / 2, X = 0.2 * b.sx, F = 0.36 * b.sz + h, R = -0.34 * b.sz - h;
+  const L: [number, number, boolean][] = [[X, F, true], [-X, F, true], [X, R, false], [-X, R, false]];
+  if (b.sx / b.sy > 1.6) L.push([0, F, true], [0, R, false]); // the wide hauler gets a middle pair
+  if (b.sz / b.sy > 1.6) L.push([X, (F + R) / 2, false], [-X, (F + R) / 2, false]); // and the limo a third axle
+  return L;
+}
+
+const _signs = new Map<string, THREE.CanvasTexture>();
+/** A little printed sign (cached). */
+function signTexture(text: string, bg: string, fg: string): THREE.CanvasTexture {
+  const key = text + bg + fg;
+  let t = _signs.get(key);
+  if (t) return t;
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = bg; g.fillRect(0, 0, 256, 64);
+  g.strokeStyle = fg; g.lineWidth = 6; g.strokeRect(4, 4, 248, 56);
+  g.fillStyle = fg; g.font = '900 34px Arial Black, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 34, 232);
+  t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  _signs.set(key, t);
+  return t;
+}
+const signMesh = (text: string, bg: string, fg: string, w: number, h: number) =>
+  new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: signTexture(text, bg, fg), side: THREE.DoubleSide }));
+
+type Fx = { stack: THREE.Object3D | null; exhaust: THREE.Object3D | null; beacon: THREE.Object3D | null; rocket: THREE.Mesh | null };
+
+/** Details that make each body its own thing (chassis space: a w-wide, l-long basket). */
+function bodyDeco(b: BodyDef, w: number, l: number, g: THREE.Group, trim: THREE.Material, fx: Fx) {
+  const gold = std(0xffc830, { metalness: 1, roughness: 0.22 }), black = std(0x18181c), amber = new THREE.MeshBasicMaterial({ color: 0xffa020 });
+  const hz = handleZ(l);
+  if (b.id === 'mini') {
+    // a kid-cart safety flag on a whippy pole
+    g.add(mesh(bar(V(0.28, 0.98, hz + 0.1), V(0.3, 2.5, hz + 0.05), 0.012, 5), std(0xf0f0f0)));
+    const flag = mesh(new THREE.BufferGeometry().setFromPoints([V(0, 0, 0), V(0, -0.3, 0), V(0, -0.15, 0.42)]), new THREE.MeshBasicMaterial({ color: 0xff6010, side: THREE.DoubleSide }), 0.3, 2.5, hz + 0.05);
+    flag.geometry.computeVertexNormals(); g.add(flag);
+  }
+  if (w > 1.6) {
+    const s = signMesh('WIDE LOAD', '#ffd21a', '#111', 0.85, 0.2); s.position.set(0, 0.62, -0.47 * l); g.add(s);
+    for (const x of [-1, 1]) for (const z of [0.5 * l, -0.46 * l]) g.add(mesh(new THREE.SphereGeometry(0.03, 8, 6), amber, x * 0.29 * w, 1.0, z));
+  }
+  if (l > 1.6) {
+    // stretch limo: gold pinstripe, hood ornament, and two little flags up front
+    const c = basketCorners(w, l);
+    for (const sd of [1, -1]) g.add(mesh(bar(V(sd * 0.275 * w, 0.83, 0.47 * l), V(sd * 0.288 * w, 0.83, -0.44 * l), 0.012, 6), gold));
+    g.add(mesh(new THREE.ConeGeometry(0.03, 0.12, 8), gold, 0, 1.02, c.tfl.z));
+    g.add(mesh(new THREE.SphereGeometry(0.03, 10, 8), gold, 0, 1.1, c.tfl.z));
+    for (const sd of [1, -1]) {
+      g.add(mesh(bar(V(sd * 0.27 * w, 0.96, c.tfl.z), V(sd * 0.27 * w, 1.3, c.tfl.z), 0.006, 4), gold));
+      g.add(mesh(new THREE.PlaneGeometry(0.14, 0.09).translate(-0.07, 0, 0), new THREE.MeshBasicMaterial({ color: sd > 0 ? 0xd02020 : 0x2040c0, side: THREE.DoubleSide }), sd * 0.27 * w, 1.25, c.tfl.z));
+    }
+  }
+  if (b.id === 'giant') {
+    g.add(mesh(new THREE.BoxGeometry(0.62, 0.1, 0.08), black, 0, 0.26, 0.52));
+    const s = signMesh('MEGA', '#ffd21a', '#111', 0.4, 0.12); s.position.set(0, 0.6, -0.47); g.add(s);
+  }
+  if (b.nest) {
+    // a flashing beacon on the lead cart so oncoming traffic has a chance
+    const bc = new THREE.Group(); bc.position.set(0, 0.99, 0.2);
+    bc.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.03, 12), black));
+    bc.add(mesh(new THREE.SphereGeometry(0.05, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xffa020, emissive: 0xff7000, emissiveIntensity: 1.2, transparent: true, opacity: 0.85 }), 0, 0.015));
+    const beam = mesh(new THREE.PlaneGeometry(0.5, 0.05).translate(0.25, 0, 0), new THREE.MeshBasicMaterial({ color: 0xffb030, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }), 0, 0.04);
+    beam.castShadow = false; bc.add(beam);
+    g.add(bc); fx.beacon = bc;
+  }
+  if (b.train) {
+    // the locomotive: smokestack, cowcatcher, headlamp, bell
+    const red = std(0xc81e1e, { roughness: 0.45 });
+    g.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.34, 12), black, 0, 1.12, 0.32));
+    g.add(mesh(new THREE.CylinderGeometry(0.12, 0.06, 0.12, 12, 1, true), black, 0, 1.34, 0.32));
+    const top = new THREE.Object3D(); top.position.set(0, 1.42, 0.32); g.add(top); fx.stack = top;
+    g.add(mesh(new THREE.BoxGeometry(0.03, 0.42, 0.03), black, 0, 0.93, 0.46)); // stack bracket
+    for (let i = 0; i <= 6; i++) { const x = (-0.5 + i / 6) * 0.5; g.add(mesh(bar(V(x * 0.15, 0.06, 0.78), V(x, 0.36, 0.53), 0.012, 4), red)); }
+    g.add(mesh(bar(V(-0.26, 0.36, 0.53), V(0.26, 0.36, 0.53), 0.016, 5), red));
+    g.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.07, 14).rotateX(Math.PI / 2), black, 0, 0.82, 0.54));
+    g.add(mesh(new THREE.CircleGeometry(0.052, 14), new THREE.MeshBasicMaterial({ color: 0xfff2b0 }), 0, 0.82, 0.578));
+    g.add(mesh(new THREE.ConeGeometry(0.045, 0.07, 12, 1, true), gold, 0.2, 1.06, 0.2));
+    g.add(mesh(bar(V(0.2, 0.98, 0.2), V(0.2, 1.1, 0.2), 0.006, 4), black));
+  }
+  void trim;
+}
+
+/** Engines live on the bottom tray (chassis space). */
+function engineModel(id: string, g: THREE.Group, fx: Fx) {
+  const metal = std(0xc0c4c8, { metalness: 0.9, roughness: 0.3 });
+  switch (id) {
+    case 'electric':
+      g.add(mesh(new THREE.BoxGeometry(0.3, 0.12, 0.24), std(0x1a2a40, { metalness: 0.6, roughness: 0.3 }), 0, 0.27, -0.05));
+      g.add(mesh(new THREE.BoxGeometry(0.31, 0.025, 0.25), new THREE.MeshBasicMaterial({ color: 0x30e0ff }), 0, 0.3, -0.05));
+      g.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.1, 10).rotateZ(Math.PI / 2), metal, 0.2, 0.27, -0.05));
+      break;
+    case 'gas': {
+      // a lawnmower engine: red block, black shroud, pull cord, rusty exhaust
+      g.add(mesh(new THREE.BoxGeometry(0.24, 0.14, 0.2), std(0xc8261e, { roughness: 0.5 }), 0, 0.29, -0.05));
+      g.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 16), std(0x1c1c1c), 0, 0.39, -0.05));
+      g.add(mesh(new THREE.BoxGeometry(0.07, 0.03, 0.025), std(0x111111), -0.16, 0.36, -0.05));
+      g.add(mesh(bar(V(-0.12, 0.36, -0.05), V(-0.16, 0.36, -0.05), 0.004, 4), std(0x222222)));
+      g.add(mesh(bar(V(0.1, 0.3, -0.12), V(0.13, 0.3, -0.4), 0.022, 8), std(0x6a4a30, { metalness: 0.6, roughness: 0.7 })));
+      const ex = new THREE.Object3D(); ex.position.set(0.13, 0.3, -0.42); g.add(ex); fx.exhaust = ex;
+      break;
+    }
+    case 'rocket': {
+      // an actual rocket, zip-tied to the tray
+      const white = std(0xf2f2f2, { roughness: 0.35 }), red = std(0xd82020, { roughness: 0.4 });
+      g.add(mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.62, 16).rotateX(Math.PI / 2), white, 0, 0.3, -0.12));
+      g.add(mesh(new THREE.ConeGeometry(0.09, 0.22, 16).rotateX(Math.PI / 2), red, 0, 0.3, 0.3));
+      g.add(mesh(new THREE.CylinderGeometry(0.092, 0.092, 0.05, 16).rotateX(Math.PI / 2), red, 0, 0.3, 0.1));
+      for (let i = 0; i < 3; i++) {
+        const f = mesh(new THREE.BoxGeometry(0.01, 0.12, 0.16), red, 0, 0.3, -0.38);
+        f.geometry.translate(0, 0.1, 0); f.rotation.z = (i / 3) * Math.PI * 2 + Math.PI; g.add(f);
+      }
+      g.add(mesh(new THREE.CylinderGeometry(0.07, 0.05, 0.1, 14, 1, true).rotateX(Math.PI / 2), std(0x2a2a2e, { metalness: 0.8 }), 0, 0.3, -0.48));
+      for (const z of [-0.25, 0.0]) g.add(mesh(new THREE.TorusGeometry(0.093, 0.008, 4, 16), std(0x111111), 0, 0.3, z));
+      const fl = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.5, 12, 1, true).rotateX(-Math.PI / 2).translate(0, 0, -0.25), new THREE.MeshBasicMaterial({ color: 0xff8a20, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+      fl.position.set(0, 0.3, -0.53); fl.renderOrder = 3; g.add(fl); fx.rocket = fl;
+      break;
+    }
+  }
+}
+
+/** Smoke puffs (exhaust, smokestack) in world space. */
+class Puffs {
+  group = new THREE.Group();
+  private list: { s: THREE.Sprite; vx: number; vy: number; vz: number; t: number; life: number; size: number }[] = [];
+  private next = 0;
+  constructor(n = 22) {
+    _glowTex ??= glowTexture();
+    for (let i = 0; i < n; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: _glowTex, transparent: true, depthWrite: false, opacity: 0 }));
+      s.visible = false; this.group.add(s);
+      this.list.push({ s, vx: 0, vy: 0, vz: 0, t: 0, life: 1, size: 0.2 });
+    }
+  }
+  emit(p: THREE.Vector3, vx: number, vy: number, vz: number, color: number, size: number, life: number) {
+    const q = this.list[this.next++ % this.list.length];
+    q.s.position.copy(p); q.vx = vx; q.vy = vy; q.vz = vz; q.t = 0; q.life = life; q.size = size;
+    (q.s.material as THREE.SpriteMaterial).color.setHex(color);
+    q.s.visible = true;
+  }
+  update(dt: number) {
+    for (const q of this.list) {
+      if (!q.s.visible) continue;
+      q.t += dt;
+      if (q.t >= q.life) { q.s.visible = false; continue; }
+      const k = q.t / q.life;
+      q.s.position.x += q.vx * dt; q.s.position.y += q.vy * dt; q.s.position.z += q.vz * dt;
+      q.vx *= 0.97; q.vz *= 0.97;
+      q.s.scale.setScalar(q.size * (1 + k * 2.5));
+      (q.s.material as THREE.SpriteMaterial).opacity = 0.75 * (1 - k);
+    }
+  }
+  dispose() { for (const q of this.list) q.s.material.dispose(); this.group.removeFromParent(); }
+}
+
+/**
+ * The path the Choo-Choo's towed carts follow. Driving forward they ride the exact line the shopper
+ * took (so they take corners the way the leader did, never cutting through a shelf end); backing up
+ * they get shoved straight back on their tow ropes (and jackknife, like real trailers).
+ */
+export class Trail {
+  cars: { x: number; z: number; yaw: number }[] = [];
+  private pts: number[] = [];
+  private onPath = true;
+  constructor(public n: number) { for (let i = 0; i < n; i++) this.cars.push({ x: 0, z: 0, yaw: 0 }); }
+
+  /** Line the carts up straight behind; with less than `room` metres free back there they pile up nested and unspool as you go. */
+  reset(x: number, z: number, yaw: number, room = Infinity) {
+    this.pts = [];
+    const total = Math.max(0.3, Math.min(TRAIN.lead + this.n * TRAIN.pitch + 2, room));
+    for (let d = total; d > 0.05; d -= 0.3) this.pts.push(x - Math.sin(yaw) * d, z - Math.cos(yaw) * d);
+    if (!this.pts.length) this.pts.push(x - Math.sin(yaw) * total, z - Math.cos(yaw) * total);
+    this.onPath = true;
+    this.sample(x, z);
+  }
+
+  update(x: number, z: number, yaw: number, reversing: boolean) {
+    if (!this.pts.length) { this.reset(x, z, yaw); return; }
+    if (reversing) { this.shove(x, z, yaw); return; }
+    if (!this.onPath) {
+      // rebuild the path from where the carts ended up (tail first)
+      this.pts = [];
+      for (let i = this.n - 1; i >= 0; i--) {
+        const c = this.cars[i], fx = Math.sin(c.yaw) * TRAIN.len / 2, fz = Math.cos(c.yaw) * TRAIN.len / 2;
+        if (i === this.n - 1) this.pts.push(c.x - fx * 3, c.z - fz * 3);
+        this.pts.push(c.x - fx, c.z - fz, c.x + fx, c.z + fz);
+      }
+      this.onPath = true;
+    }
+    const k = this.pts.length;
+    if (Math.hypot(x - this.pts[k - 2], z - this.pts[k - 1]) > 0.15) this.pts.push(x, z);
+    // forget the path behind the caboose
+    const need = TRAIN.lead + this.n * TRAIN.pitch + 1.5;
+    let acc = Math.hypot(x - this.pts[this.pts.length - 2], z - this.pts[this.pts.length - 1]);
+    for (let i = this.pts.length - 4; i >= 0; i -= 2) {
+      acc += Math.hypot(this.pts[i + 2] - this.pts[i], this.pts[i + 3] - this.pts[i + 1]);
+      if (acc > need) { if (i > 0) this.pts.splice(0, i); break; }
+    }
+    this.sample(x, z);
+  }
+
+  /** Pose every cart from the path: nose at lead + i·pitch behind the head, tail one cart-length further. */
+  private sample(hx: number, hz: number) {
+    const P = this.pts;
+    let i = P.length - 2, ax = hx, az = hz, bx = P[i], bz = P[i + 1], s0 = 0, seg = Math.hypot(bx - ax, bz - az);
+    const at = (d: number, out: number[]) => {
+      while (d > s0 + seg && i >= 2) { s0 += seg; ax = bx; az = bz; i -= 2; bx = P[i]; bz = P[i + 1]; seg = Math.hypot(bx - ax, bz - az); }
+      const t = seg > 1e-6 ? Math.min(1, (d - s0) / seg) : 0; // past the end of the path the carts pile up
+      out[0] = ax + (bx - ax) * t; out[1] = az + (bz - az) * t;
+    };
+    for (let c = 0; c < this.n; c++) {
+      const d = TRAIN.lead + c * TRAIN.pitch;
+      at(d, _f); at(d + TRAIN.len, _r);
+      const car = this.cars[c];
+      car.x = (_f[0] + _r[0]) / 2; car.z = (_f[1] + _r[1]) / 2;
+      car.yaw = Math.atan2(_f[0] - _r[0], _f[1] - _r[1]);
+    }
+  }
+
+  /** Reversing: each cart is pushed by the one in front, swinging about like a trailer. */
+  private shove(x: number, z: number, yaw: number) {
+    this.onPath = false;
+    let hx = x - Math.sin(yaw) * TRAIN.lead, hz = z - Math.cos(yaw) * TRAIN.lead;
+    for (const c of this.cars) {
+      const dx = hx - c.x, dz = hz - c.z, d = Math.hypot(dx, dz) || 1;
+      const ux = dx / d, uz = dz / d;
+      c.x = hx - ux * TRAIN.len / 2; c.z = hz - uz * TRAIN.len / 2; c.yaw = Math.atan2(ux, uz);
+      hx = c.x - ux * (TRAIN.pitch - TRAIN.len / 2); hz = c.z - uz * (TRAIN.pitch - TRAIN.len / 2);
+    }
+  }
+}
+const _f = [0, 0], _r = [0, 0];
 
 /** Front add-ons. Origin = front centre of the basket at floor level, +Z forward. */
 function addonModel(id: string): THREE.Group {
@@ -201,7 +469,7 @@ function hatModel(id: string, shirt: THREE.Material, cartMat: THREE.Material): T
       add(new THREE.SphereGeometry(0.022, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff1040, emissive: 0x600010 }), 0, 0.04, 0.125);
       break;
     }
-    case 'cart': { const c = mesh(_frameLo.g!, cartMat); c.scale.setScalar(0.3); c.position.set(0, -0.11, 0); g.add(c); break; }
+    case 'cart': { const c = mesh(frameGeo(false), cartMat); c.scale.setScalar(0.3); c.position.set(0, -0.11, 0); g.add(c); break; }
     default: add(new THREE.CylinderGeometry(0.135, 0.14, 0.07, 12), shirt, 0, -0.02); add(new THREE.BoxGeometry(0.2, 0.015, 0.12), shirt, 0, -0.05, 0.13);
   }
   return g;
@@ -258,7 +526,22 @@ export class CartModel {
   private hatId = '';
   private shirtMat: THREE.Material | null = null;
   addon: THREE.Group | null = null;
-  motor: THREE.Group;
+  /** The engine bolted to the bottom tray (lawnmower / electric / rocket). */
+  motor = new THREE.Group();
+  private engineId = '';
+  private fHi: THREE.Mesh; private fLo: THREE.Mesh; private panel: THREE.Mesh; private seat: THREE.Mesh;
+  private grips: THREE.Mesh[] = [];
+  /** Body-specific details (chassis space): the limo's hood ornament, the train's smokestack... */
+  private deco = new THREE.Group();
+  /** Nested (Ground-Scraper) or towed (Choo-Choo) carts, in root space. */
+  private extra = new THREE.Group();
+  private towed: { frames: THREE.InstancedMesh; grips: THREE.InstancedMesh; wheels: THREE.InstancedMesh; ropes: THREE.InstancedMesh } | null = null;
+  /** The Choo-Choo's path; set by the physics cart (null in the garage: the train sits straight). */
+  trail: Trail | null = null;
+  private fx = { stack: null as THREE.Object3D | null, exhaust: null as THREE.Object3D | null, beacon: null as THREE.Object3D | null, rocket: null as THREE.Mesh | null, chuff: 0, puff: 0 };
+  private puffs: Puffs | null = null;
+  /** Half the extra length of a nested body (m): the front cart sits this far ahead of centre. */
+  half = 0;
   flames: THREE.Mesh[] = [];
   /** First-person eye placement for this body (game camera). */
   eye = { back: 0.98, height: 1.62, rideBack: 0.62, rideHeight: 1.95 };
@@ -282,35 +565,21 @@ export class CartModel {
 
   constructor(custom: Customization, opts: { avatarColor?: number; name?: string; local?: boolean; envMap?: THREE.Texture | null }) {
     this.skinMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 1, roughness: 0.3, envMap: opts.envMap ?? null });
-    _frameHi.g ??= frameGeometry(true);
-    _frameLo.g ??= frameGeometry(false);
     const hi = new THREE.Group(), lo = new THREE.Group();
-    const fh = new THREE.Mesh(_frameHi.g, this.skinMat); fh.castShadow = true; hi.add(fh);
-    const fl = new THREE.Mesh(_frameLo.g, this.skinMat); lo.add(fl);
+    this.fHi = new THREE.Mesh(frameGeo(true), this.skinMat); this.fHi.castShadow = true; hi.add(this.fHi);
+    this.fLo = new THREE.Mesh(frameGeo(false), this.skinMat); lo.add(this.fLo);
     // lo: a see-through panel box so the silhouette still reads as a basket far away
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.5, 0.92), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.25, depthWrite: false }));
-    panel.position.set(0, 0.72, 0.02); lo.add(panel);
+    this.panel = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.5, 0.92), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.25, depthWrite: false }));
+    this.panel.position.set(0, 0.72, 0.02); lo.add(this.panel);
     // handle with plastic grip
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.62, 8).rotateZ(Math.PI / 2), this.trimMat);
-    grip.position.set(0, 1.0, -0.55); hi.add(grip); lo.add(grip.clone());
+    for (const g of [hi, lo]) { const grip = new THREE.Mesh(gripGeo(), this.trimMat); grip.position.set(0, 1.0, handleZ()); g.add(grip); this.grips.push(grip); }
     // child seat flap plate
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.015, 0.16), this.trimMat);
-    seat.position.set(0, 0.95, -0.38); hi.add(seat);
+    this.seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.015, 0.16), this.trimMat);
+    this.seat.position.set(0, 0.95, -0.38); hi.add(this.seat);
     this.lod.addLevel(hi, 0);
     this.lod.addLevel(lo, 22);
-    this.chassis.add(this.lod);
-    this.root.add(this.chassis);
-
-    // wheels: rear fixed, front casters swivel
-    for (const [x, z, caster] of [[0.2, 0.36, true], [-0.2, 0.36, true], [0.2, -0.34, false], [-0.2, -0.34, false]] as const) {
-      const pivot = new THREE.Group(); pivot.userData.base = [x, z];
-      const fork = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.12, 0.05), this.skinMat); fork.position.set(0.03, 0.12, 0); pivot.add(fork);
-      const wheel = new THREE.Mesh(undefined, this.wheelMat); wheel.castShadow = true;
-      pivot.add(wheel);
-      this.root.add(pivot);
-      this.wheels.push(wheel); this.pivots.push(pivot); this.forks.push(fork);
-      if (caster) this.casters.push(pivot);
-    }
+    this.chassis.add(this.lod, this.deco);
+    this.root.add(this.chassis, this.extra);
     _glowTex ??= glowTexture();
     this.neonMat = new THREE.MeshBasicMaterial({ map: _glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, color: 0xff00ff });
     this.neon = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.9).rotateX(-Math.PI / 2), this.neonMat);
@@ -321,11 +590,6 @@ export class CartModel {
     this.chassis.add(this.neonStrip);
     this.root.add(this.cargo);
 
-    // electric motor on the bottom tray
-    this.motor = new THREE.Group();
-    this.motor.add(mesh(new THREE.BoxGeometry(0.3, 0.12, 0.24), std(0x1a2a40, { metalness: 0.6, roughness: 0.3 }), 0, 0.27, -0.05));
-    this.motor.add(mesh(new THREE.BoxGeometry(0.31, 0.025, 0.25), new THREE.MeshBasicMaterial({ color: 0x30e0ff }), 0, 0.3, -0.05));
-    this.motor.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.1, 10).rotateZ(Math.PI / 2), std(0xc0c4c8, { metalness: 0.9 }), 0.2, 0.27, -0.05));
     this.chassis.add(this.motor);
     // nitro flames out the back
     for (const s of [-1, 1]) {
@@ -359,10 +623,16 @@ export class CartModel {
     const neon = this.neonDef;
     this.neon.visible = this.neonStrip.visible = neon.color !== null;
     if (neon.color !== null) { this.neonMat.color.setHex(neon.color); (this.neonStrip.material as THREE.MeshBasicMaterial).color.setHex(neon.color); }
-    this.motor.visible = c.engine === 'electric';
+    if (c.engine !== this.engineId) {
+      this.engineId = c.engine;
+      this.motor.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); });
+      this.motor.clear();
+      this.fx.rocket = this.fx.exhaust = null;
+      engineModel(c.engine, this.motor, this.fx);
+    }
     if (this.avatar && c.hat !== this.hatId) {
       this.hatId = c.hat;
-      if (this.hat) { this.avatar.remove(this.hat); this.hat.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.geometry !== _frameLo.g) m.geometry.dispose(); }); }
+      if (this.hat) { this.avatar.remove(this.hat); this.hat.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !SHARED.has(m.geometry)) m.geometry.dispose(); }); }
       this.hat = hatModel(c.hat, this.shirtMat!, this.skinMat);
       this.hat.position.set(0, 1.84, 0.02);
       this.avatar.add(this.hat);
@@ -377,41 +647,66 @@ export class CartModel {
     const W = this.wheelDef;
     const ws = (this.ws = Math.min(b.sx, b.sy, b.sz));
     const lift = (this.lift = (W.radius - 0.07) * ws);
-    this.chassis.scale.set(b.sx, b.sy, b.sz);
-    this.chassis.position.y = lift;
+    const h = (this.half = bodyTail(b) / 2);
+    // the basket is built for its proportions and only scaled uniformly (no stretched wires)
+    const u = b.sy, w = b.sx / u, l = b.sz / u;
+    this.chassis.scale.setScalar(u);
+    this.chassis.position.set(0, lift, h);
+    this.fHi.geometry = frameGeo(true, w, l);
+    this.fLo.geometry = frameGeo(false, w, l);
+    this.panel.geometry.dispose(); this.panel.geometry = new THREE.BoxGeometry(0.54 * w, 0.5, 0.92 * l);
+    for (const g of this.grips) { g.geometry = gripGeo(w); g.position.z = handleZ(l); }
+    this.seat.position.z = -0.38 * l;
+
+    // wheels: rear fixed, front casters swivel
+    for (const p of this.pivots) this.root.remove(p);
+    this.wheels = []; this.pivots = []; this.forks = []; this.casters = [];
     const wg = wheelGeometry(W);
-    this.pivots.forEach((p, i) => {
-      const [x, z] = p.userData.base as [number, number];
-      p.position.set(x * b.sx, 0, z * b.sz);
-      const w = this.wheels[i];
-      w.geometry?.dispose(); w.geometry = wg;
-      w.scale.setScalar(ws); w.position.y = W.radius * ws;
-      const f = this.forks[i];
-      f.scale.set(ws, Math.max(1, (W.radius / 0.07) * 0.8) * ws, ws); f.position.set(0.03 * ws, W.radius * ws + 0.05 * ws, 0);
-    });
-    this.neon.scale.set(Math.max(0.6, b.sx), 1, Math.max(0.6, b.sz));
+    for (const [x, z, caster] of wheelLayout(b)) {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, 0, z);
+      const fork = new THREE.Mesh(_forkGeo, this.skinMat);
+      fork.scale.set(ws, Math.max(1, (W.radius / 0.07) * 0.8) * ws, ws); fork.position.set(0.03 * ws, W.radius * ws + 0.05 * ws, 0);
+      const wheel = new THREE.Mesh(wg, this.wheelMat); wheel.castShadow = true;
+      wheel.scale.setScalar(ws); wheel.position.y = W.radius * ws;
+      pivot.add(fork, wheel);
+      this.root.add(pivot);
+      this.wheels.push(wheel); this.pivots.push(pivot); this.forks.push(fork);
+      if (caster) this.casters.push(pivot);
+    }
+    this.neon.scale.set(Math.max(0.6, b.sx), 1, Math.max(0.6, b.sz + 2 * h / 0.92));
     this.cargo.position.set(0, lift + 0.47 * b.sy, 0);
     this.cargo.scale.setScalar(ws);
 
     // stacked levels (double / triple / 100-storey tower)
-    for (const l of this.levels) this.chassis.remove(l);
+    for (const lv of this.levels) this.chassis.remove(lv);
     this.levels = [];
     if (this.tower) { this.chassis.remove(this.tower); this.tower.dispose(); this.tower = null; }
     for (let i = 1; i < Math.min(b.levels, 4); i++) {
       const g = new THREE.Group();
-      g.add(mesh(_frameHi.g!, this.skinMat));
-      const grip = mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.62, 8).rotateZ(Math.PI / 2), this.trimMat, 0, 1.0, -0.55);
-      g.add(grip);
+      g.add(mesh(frameGeo(true, w, l), this.skinMat));
+      g.add(mesh(gripGeo(w), this.trimMat, 0, 1.0, handleZ(l)));
       g.position.y = i * LEVEL_H;
       this.levels.push(g); this.chassis.add(g);
     }
     if (b.levels > 4) {
-      this.tower = new THREE.InstancedMesh(_frameLo.g!, this.skinMat, b.levels - 4);
+      this.tower = new THREE.InstancedMesh(frameGeo(false, w, l), this.skinMat, b.levels - 4);
       this.tower.frustumCulled = false;
       this.chassis.add(this.tower);
     }
     this.sway.x = this.sway.vx = this.sway.z = this.sway.vz = 0;
     this.layoutLevels();
+
+    // per-body details, nested / towed carts
+    this.deco.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !SHARED.has(m.geometry)) m.geometry.dispose(); });
+    this.deco.clear();
+    this.fx.stack = this.fx.beacon = null;
+    bodyDeco(b, w, l, this.deco, this.trimMat, this.fx);
+    this.extra.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { if ((m as THREE.InstancedMesh).isInstancedMesh) (m as THREE.InstancedMesh).dispose(); if (!SHARED.has(m.geometry) && m.geometry !== wg) m.geometry.dispose(); } });
+    this.extra.clear();
+    this.towed = null;
+    if (b.nest) this.buildNest(b, wg, lift);
+    if (b.train) this.buildTrain(b, wg, lift);
 
     // front add-on
     if (this.addon) { this.root.remove(this.addon); this.addon.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose(); }); }
@@ -419,21 +714,85 @@ export class CartModel {
     if (this.addon) {
       const wide = this.custom.addon === 'vacuum' || this.custom.addon === 'ram';
       this.addon.scale.set(wide ? b.sx : ws, b.sy, ws);
-      this.addon.position.set(0, lift, 0.5 * b.sz);
+      this.addon.position.set(0, lift, 0.5 * b.sz + h);
       this.root.add(this.addon);
     }
-    this.flames.forEach((f) => f.position.set(f.userData.side * 0.2 * b.sx, lift + 0.2 * b.sy, -0.46 * b.sz));
+    this.flames.forEach((f) => f.position.set(f.userData.side * 0.2 * b.sx, lift + 0.2 * b.sy, -0.46 * b.sz - h));
 
     // the shopper stays human-sized (a bit bigger for the mega cart) and stands at the handle
     const as = (this.avatarScale = b.sy > 1 ? Math.min(1.45, b.sy * 0.8) : 1);
-    const handleY = lift + 1.0 * b.sy, handleZ = -0.55 * b.sz;
+    const handleY = lift + 1.0 * b.sy, hz = handleZ(l) * u - h;
     if (this.avatar) { this.avatar.scale.setScalar(as); }
-    if (this.hands) this.hands.position.set(0, handleY - 1.0, handleZ + 0.55);
-    if (this.tag) this.tag.position.set(0, Math.max(2.25 * as, handleY + 1), handleZ - 0.35);
+    if (this.hands) this.hands.position.set(0, handleY - 1.0, hz + 0.55);
+    if (this.tag) this.tag.position.set(0, Math.max(2.25 * as, handleY + 1), hz - 0.35);
     this.eye = {
-      back: -handleZ + 0.43, height: Math.max(1.62 * as, handleY + 0.45),
-      rideBack: -handleZ + 0.07, rideHeight: handleY + 0.95,
+      back: -hz + 0.43, height: Math.max(1.62 * as, handleY + 0.45),
+      rideBack: -hz + 0.07, rideHeight: handleY + 0.95,
     };
+  }
+
+  /** Ground-Scraper: 99 more carts nested behind the front one, each with its own handle and four wheels. */
+  private buildNest(b: BodyDef, wg: THREE.BufferGeometry, lift: number) {
+    const n = (b.nest ?? 1) - 1, W = this.wheelDef, h = this.half;
+    const frames = new THREE.InstancedMesh(frameGeo(true), this.skinMat, n);
+    const grips = new THREE.InstancedMesh(gripGeo(), this.trimMat, n);
+    const wheels = new THREE.InstancedMesh(wg, this.wheelMat, n * 4);
+    for (let k = 0; k < n; k++) {
+      const z = h - (k + 1) * NEST_PITCH;
+      frames.setMatrixAt(k, _m2.makeTranslation(0, lift, z));
+      grips.setMatrixAt(k, _m2.makeTranslation(0, lift + 1.0, z + handleZ()));
+      [[0.2, 0.36], [-0.2, 0.36], [0.2, -0.34], [-0.2, -0.34]].forEach(([x, wz], j) => wheels.setMatrixAt(k * 4 + j, _m2.makeTranslation(x, W.radius, z + wz)));
+    }
+    for (const m of [frames, grips, wheels]) { m.frustumCulled = false; m.castShadow = true; this.extra.add(m); }
+    // OVERSIZE LOAD banner across the back
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.18), new THREE.MeshBasicMaterial({ map: signTexture('OVERSIZE LOAD', '#ffd21a', '#111'), side: THREE.DoubleSide }));
+    sign.position.set(0, lift + 0.62, -h - 0.47); sign.rotation.y = Math.PI;
+    this.extra.add(sign);
+  }
+
+  /** Choo-Choo: carts on a tow rope behind the shopper (posed every frame from the trail). */
+  private buildTrain(b: BodyDef, wg: THREE.BufferGeometry, lift: number) {
+    const n = b.train ?? 0;
+    const frames = new THREE.InstancedMesh(frameGeo(true), this.skinMat, n);
+    const grips = new THREE.InstancedMesh(gripGeo(), this.trimMat, n);
+    const wheels = new THREE.InstancedMesh(wg, this.wheelMat, n * 4);
+    const ropes = new THREE.InstancedMesh(_ropeGeo, _ropeMat, n);
+    for (const m of [frames, grips, wheels, ropes]) { m.frustumCulled = false; m.castShadow = m !== ropes; this.extra.add(m); }
+    frames.position.y = grips.position.y = lift;
+    this.towed = { frames, grips, wheels, ropes };
+    this.poseTrain(0);
+  }
+
+  /** Put the towed carts where the trail says (or in a straight line when there's no trail: the garage). */
+  private poseTrain(spin: number) {
+    const T = this.towed; if (!T) return;
+    const n = T.frames.count, W = this.wheelDef, r = this.root;
+    const c = Math.cos(r.rotation.y), sn = Math.sin(r.rotation.y);
+    let px = 0, pz = this.avatar?.position.z ?? -0.95; // the rope is tied to the shopper's belt
+    _qs.setFromAxisAngle(_ax, spin);
+    for (let i = 0; i < n; i++) {
+      let x: number, z: number, yaw: number;
+      const car = this.trail?.cars[i];
+      if (car) {
+        // world → this cart's local frame
+        const dx = car.x - r.position.x, dz = car.z - r.position.z;
+        x = dx * c - dz * sn; z = dx * sn + dz * c; yaw = car.yaw - r.rotation.y;
+      } else { x = 0; z = -(TRAIN.lead + TRAIN.len / 2 + i * TRAIN.pitch); yaw = 0; }
+      _q2.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+      T.frames.setMatrixAt(i, _m2.compose(_p2.set(x, 0, z), _q2, _one));
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      T.grips.setMatrixAt(i, _m2.compose(_p2.set(x + fx * handleZ(), 1.0, z + fz * handleZ()), _q2, _one));
+      [[0.2, 0.36], [-0.2, 0.36], [0.2, -0.34], [-0.2, -0.34]].forEach(([wx, wz], j) => {
+        _p2.set(x + fz * wx + fx * wz, W.radius, z - fx * wx + fz * wz);
+        T.wheels.setMatrixAt(i * 4 + j, _m2.compose(_p2, _q3.copy(_q2).multiply(_qs), _one));
+      });
+      // rope from the previous hitch to this cart's nose
+      const nx = x + fx * 0.5, nz = z + fz * 0.5, ddx = nx - px, ddz = nz - pz, d = Math.max(0.01, Math.hypot(ddx, ddz));
+      _q3.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.atan2(-ddx, -ddz));
+      T.ropes.setMatrixAt(i, _m2.compose(_p2.set((nx + px) / 2, 0.32, (nz + pz) / 2), _q3, _s.set(1, 1, d)));
+      px = x - fx * 0.48; pz = z - fz * 0.48;
+    }
+    for (const m of [T.frames, T.grips, T.wheels, T.ropes]) m.instanceMatrix.needsUpdate = true;
   }
 
   /** Stacked carts bend like a cantilever: offset grows with height², each level tilts with the slope. */
@@ -567,6 +926,7 @@ export class CartModel {
     if (boosting) this.flameMat.color.copy(hsl(0.06 + Math.random() * 0.05, 1, 0.55));
     const spin = this.addon?.userData.spin as THREE.Object3D | undefined;
     if (spin) spin.rotation.y += dt * 25;
+    this.animateParts(dt, time, speed, boosting);
     const prop = this.hat?.userData.spin as THREE.Object3D | undefined;
     if (prop) prop.rotation.y += dt * (3 + Math.abs(speed) * 5);
     if (this.bubble) {
@@ -600,21 +960,60 @@ export class CartModel {
       const as = this.avatarScale, b = this.body;
       this.legs.forEach((l, i) => { l.rotation.x = riding ? (i ? -0.2 : 0.4) : Math.sin(ph + i * Math.PI) * 0.9 * run; });
       this.avatar.position.y = riding ? this.lift + 0.32 * b.sy : Math.abs(Math.sin(ph)) * 0.06 * run;
-      this.avatar.position.z = riding ? -0.62 * b.sz : -(0.49 * b.sz + 0.46 * as);
+      const hz = handleZ(b.sz / b.sy) * b.sy - this.half;
+      this.avatar.position.z = riding ? hz - 0.07 : hz - 0.4 * as;
       this.avatar.rotation.x = riding ? -0.1 : 0.25 * run;
     }
   }
 
+  /** Engines, smoke, the beacon and the towed carts. */
+  private animateParts(dt: number, time: number, speed: number, boosting: boolean) {
+    const fx = this.fx, sp = Math.abs(speed);
+    if (fx.beacon) fx.beacon.rotation.y += dt * 7;
+    if (fx.rocket) {
+      // always lit; roars with speed and nitro
+      const k = (0.55 + Math.min(1, sp / 8) * 0.6 + (boosting ? 1.1 : 0)) * (0.85 + Math.random() * 0.3);
+      fx.rocket.scale.set(1 + (boosting ? 0.4 : 0), 1 + (boosting ? 0.4 : 0), k);
+      (fx.rocket.material as THREE.MeshBasicMaterial).color.copy(hsl(0.06 + Math.random() * 0.06, 1, boosting ? 0.62 : 0.55));
+    }
+    if (this.engineId === 'gas') this.motor.position.set((Math.random() - 0.5) * 0.008, (Math.random() - 0.5) * 0.006, 0); // it rattles
+    if ((fx.stack || fx.exhaust) && this.root.parent && dt > 0) {
+      if (!this.puffs) this.puffs = new Puffs();
+      if (this.puffs.group.parent !== this.root.parent) this.root.parent.add(this.puffs.group);
+      const fwdX = Math.sin(this.root.rotation.y), fwdZ = Math.cos(this.root.rotation.y);
+      if (fx.exhaust) {
+        fx.puff -= dt;
+        if (fx.puff <= 0) {
+          fx.puff = 0.22 / (1 + sp * 0.25);
+          fx.exhaust.getWorldPosition(_wp);
+          this.puffs.emit(_wp, -fwdX * 0.6 + (Math.random() - 0.5) * 0.2, 0.35, -fwdZ * 0.6 + (Math.random() - 0.5) * 0.2, 0x55524c, 0.12, 0.9);
+        }
+      }
+      if (fx.stack) {
+        fx.chuff -= dt;
+        if (fx.chuff <= 0) {
+          fx.chuff = 0.18 + 0.9 / (1 + sp * 0.8); // choo... choo.. choo.choo.choo
+          fx.stack.getWorldPosition(_wp);
+          this.puffs.emit(_wp, -fwdX * sp * 0.4, 1.2 + Math.random() * 0.4, -fwdZ * sp * 0.4, 0xe8e8e8, 0.22, 1.6);
+        }
+      }
+    }
+    this.puffs?.update(dt);
+    if (this.towed) this.poseTrain(this.wheelSpin);
+    void time;
+  }
+
   dispose() {
+    this.puffs?.dispose();
     this.clearBubble();
     this.tower?.dispose();
-    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.geometry !== _frameHi.g && m.geometry !== _frameLo.g) m.geometry.dispose(); });
+    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !SHARED.has(m.geometry)) m.geometry.dispose(); });
   }
 }
-const _e = new THREE.Euler(), _q2 = new THREE.Quaternion(), _p2 = new THREE.Vector3(), _m2 = new THREE.Matrix4(), _one = new THREE.Vector3(1, 1, 1);
+const _e = new THREE.Euler(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _qs = new THREE.Quaternion(), _p2 = new THREE.Vector3(), _m2 = new THREE.Matrix4(), _one = new THREE.Vector3(1, 1, 1), _s = new THREE.Vector3(), _ax = new THREE.Vector3(1, 0, 0), _wp = new THREE.Vector3();
 
 // ---------------- physics ----------------
-const _v = new THREE.Vector3();
+const _v = new THREE.Vector3(), _qt = new THREE.Quaternion();
 
 export interface CartState { x: number; y: number; z: number; yaw: number; vx: number; vz: number; w: number; riding: boolean; boost: number }
 
@@ -681,13 +1080,57 @@ export class Cart {
     };
     const B = this.stats.body, W = this.stats.wheel, mm = this.stats.mass;
     const ws = Math.min(B.sx, B.sy, B.sz), wr = Math.max(0.035, W.radius * ws), lift = (W.radius - 0.07) * ws;
+    const h = bodyTail(B) / 2; // nested carts: the whole row is one long basket
     // tall stacks get colliders for the first few storeys (they'll clip high shelves); the rest is scenery
-    for (let i = 0; i < Math.min(B.levels, 5); i++) mk(RAPIER.ColliderDesc.cuboid(0.28 * B.sx, 0.27 * B.sy, 0.46 * B.sz).setTranslation(0, lift + (0.71 + i * LEVEL_H) * B.sy, 0).setMass((i ? 6 : 16) * mm));
-    mk(RAPIER.ColliderDesc.cuboid(0.22 * B.sx, 0.04 * B.sy, 0.38 * B.sz).setTranslation(0, lift + 0.2 * B.sy, 0).setMass(6 * mm));
-    for (const [x, z] of [[0.2, 0.36], [-0.2, 0.36], [0.2, -0.34], [-0.2, -0.34]]) mk(RAPIER.ColliderDesc.ball(wr).setTranslation(x * B.sx, wr, z * B.sz).setMass(2 * mm));
-    if (this.stats.addon !== 'none') mk(RAPIER.ColliderDesc.cuboid(0.3 * (this.stats.addon === 'vacuum' || this.stats.addon === 'ram' ? B.sx : ws), 0.2 * B.sy, 0.1 * ws).setTranslation(0, lift + 0.4 * B.sy, 0.5 * B.sz + 0.1 * ws).setMass(3 * mm));
+    for (let i = 0; i < Math.min(B.levels, 5); i++) mk(RAPIER.ColliderDesc.cuboid(0.28 * B.sx, 0.27 * B.sy, 0.46 * B.sz + h).setTranslation(0, lift + (0.71 + i * LEVEL_H) * B.sy, 0).setMass((i ? 6 : 16) * mm));
+    mk(RAPIER.ColliderDesc.cuboid(0.22 * B.sx, 0.04 * B.sy, 0.38 * B.sz + h).setTranslation(0, lift + 0.2 * B.sy, 0).setMass(6 * mm));
+    for (const [x, z] of wheelLayout(B)) mk(RAPIER.ColliderDesc.ball(wr).setTranslation(x, wr, z).setMass(2 * mm));
+    if (this.stats.addon !== 'none') mk(RAPIER.ColliderDesc.cuboid(0.3 * (this.stats.addon === 'vacuum' || this.stats.addon === 'ram' ? B.sx : ws), 0.2 * B.sy, 0.1 * ws).setTranslation(0, lift + 0.4 * B.sy, 0.5 * B.sz + h + 0.1 * ws).setMass(3 * mm));
     // the shopper: a capsule behind the handle (they collide with shelves too)
-    mk(RAPIER.ColliderDesc.capsule(0.5, 0.22).setTranslation(0, 0.9, -(0.46 * B.sz + 0.42)).setMass(70 * mm));
+    mk(RAPIER.ColliderDesc.capsule(0.5, 0.22).setTranslation(0, 0.9, -(0.46 * B.sz + 0.42 + h)).setMass(70 * mm));
+    this.buildTrain();
+  }
+
+  /**
+   * Choo-Choo: the towed carts follow a trail. Carts this machine simulates also push loose stock
+   * around with them (kinematic boxes that only touch items: they can't wreck shelves or rivals).
+   */
+  private buildTrain() {
+    for (const c of this.towBodies) this.phys.world.removeRigidBody(c);
+    this.towBodies = [];
+    const n = this.stats.body.train ?? 0;
+    this.trail = n ? new Trail(n) : null;
+    this.model.trail = this.trail;
+    if (!this.trail) return;
+    const t = this.body.translation();
+    this.trail.reset(t.x, t.z, this.yaw, this.roomBehind());
+    if (this.kinematic) return;
+    for (const c of this.trail.cars) {
+      const rb = this.phys.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(c.x, 0, c.z));
+      this.phys.world.createCollider(RAPIER.ColliderDesc.cuboid(0.28, 0.3, 0.46).setTranslation(0, 0.6, 0).setCollisionGroups(groups(G.CART, G.ITEM)), rb);
+      this.towBodies.push(rb);
+    }
+  }
+  trail: Trail | null = null;
+  private towBodies: RAPIER.RigidBody[] = [];
+
+  /** Free floor straight behind the cart (to the nearest wall / shelf / counter), for laying out the train. */
+  private roomBehind(): number {
+    const t = this.body.translation(), y = this.yaw;
+    const ray = new RAPIER.Ray({ x: t.x, y: 0.5, z: t.z }, { x: -Math.sin(y), y: 0, z: -Math.cos(y) });
+    const hit = this.phys.world.castRay(ray, 40, true, undefined, groups(ALL, G.STATIC | G.SHELF), undefined, this.body);
+    return hit ? hit.timeOfImpact - 0.4 : 40;
+  }
+
+  /** Move the towed carts along (after the leader's control step, or from a remote pose). */
+  private tow(x: number, z: number, yaw: number, reversing: boolean) {
+    if (!this.trail) return;
+    this.trail.update(x, z, yaw, reversing);
+    this.trail.cars.forEach((c, i) => {
+      const rb = this.towBodies[i]; if (!rb) return;
+      rb.setNextKinematicTranslation({ x: c.x, y: 0, z: c.z });
+      rb.setNextKinematicRotation(_qt.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, c.yaw));
+    });
   }
 
   get yaw() { const r = this.body.rotation(); return Math.atan2(2 * (r.w * r.y + r.x * r.z), 1 - 2 * (r.y * r.y + r.x * r.x)); }
@@ -741,7 +1184,7 @@ export class Cart {
       if (this.charges < 4) { this.chargeT += dt; if (this.chargeT > 9) { this.chargeT = 0; this.charges++; } }
       if (inp.action && !this.actionHeld && this.charges >= 1) {
         this.charges--;
-        const back = 0.46 * S.body.sz + 1.6;
+        const back = 0.46 * S.body.sz + 1.6 + bodyTail(S.body) / 2 + (S.body.train ? TRAIN.lead + S.body.train * TRAIN.pitch : 0);
         this.onDrop?.(t.x - Math.sin(yaw) * back, t.z - Math.cos(yaw) * back);
       }
     }
@@ -770,7 +1213,7 @@ export class Cart {
       if (!this.riding) {
         if (inp.throttle > 0) a = inp.throttle * (sprint ? 9 : 7) * S.accel * Math.max(0, 1 - vF / vmax);
         else if (inp.throttle < 0) a = vF > 0.4 ? inp.throttle * 10 : inp.throttle * 4 * Math.max(0, 1 + vF / 3.2);
-      } else if (S.motor && inp.throttle > 0) a = inp.throttle * 3.4 * S.accel * Math.max(0, 1 - vF / (vmax * 0.95)); // the motor drives you while you ride
+      } else if (S.motor && inp.throttle > 0) a = inp.throttle * S.ride * S.accel * Math.max(0, 1 - vF / (vmax * 0.95)); // the motor drives you while you ride
       // torque: a shove off the line that doesn't care how full the basket is
       if (S.torque && inp.throttle > 0) a += S.torque * 0.8 * Math.max(0, 1 - vF / 4);
       if ((this.boost > 0 || firing) && vF < vmax) a += firing ? 5.5 + 0.9 * (S.nitroPower - 1.45) / 0.07 : 6;
@@ -804,6 +1247,7 @@ export class Cart {
       }
     }
     this.fwdSpeed = vF; this.latSpeed = vL;
+    this.tow(t.x, t.z, yaw, vF < -0.15);
     // keep it from tunnelling below the floor after a huge hit
     if (t.y < -1) { b.setTranslation({ x: t.x, y: 0.3, z: t.z }, true); b.setLinvel({ x: 0, y: 0, z: 0 }, true); }
   }
@@ -821,11 +1265,12 @@ export class Cart {
     this.body.setRotation(new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.trail?.reset(x, z, yaw, this.roomBehind());
   }
 
   /** Front of the cart (vacuum nozzle / magnet) in world space. */
   nose(out = { x: 0, z: 0 }) {
-    const t = this.body.translation(), y = this.yaw, d = 0.5 * this.stats.body.sz + 0.2;
+    const t = this.body.translation(), y = this.yaw, d = 0.5 * this.stats.body.sz + 0.2 + bodyTail(this.stats.body) / 2;
     out.x = t.x + Math.sin(y) * d; out.z = t.z + Math.cos(y) * d;
     return out;
   }
@@ -838,6 +1283,11 @@ export class Cart {
   /** Sync the visual model to the body (local/bot carts) — remote carts are posed by the interpolator. */
   syncModel(dt: number, time: number, pose?: { x: number; y: number; z: number; yaw: number; speed: number; lat: number; riding: boolean; boost: boolean }) {
     if (pose) {
+      if (this.trail) {
+        const r = this.model.root.position;
+        if (Math.hypot(pose.x - r.x, pose.z - r.z) > 6) this.trail.reset(pose.x, pose.z, pose.yaw); // teleported / first pose
+        else this.tow(pose.x, pose.z, pose.yaw, pose.speed < -0.15);
+      }
       this.model.root.position.set(pose.x, pose.y, pose.z);
       this.model.root.rotation.set(0, pose.yaw, 0);
       this.model.animate(dt, time, pose.speed, pose.lat, pose.riding, pose.boost);
@@ -854,6 +1304,7 @@ export class Cart {
   forward(out = _v) { const y = this.yaw; return out.set(Math.sin(y), 0, Math.cos(y)); }
 
   destroy() {
+    for (const c of this.towBodies) this.phys.world.removeRigidBody(c);
     for (const c of this.colliders) this.phys.offForce(c.handle);
     this.phys.world.removeRigidBody(this.body);
     this.model.dispose();
