@@ -384,8 +384,29 @@ function endGame() {
 }
 
 const REWARD = [150, 110, 90, 70, 55, 45, 35, 25];
+let paidRace: Game | null = null; // each race pays out once (leaving early, then the real end, doesn't pay twice)
+
+/** Checked out early? Take your coupons now instead of waiting for the clock. Your place can't
+ *  change any more: everyone still shopping will finish after you. */
+function leaveEarly() {
+  if (!game || game.phase !== 'race' || !game.local.done || paidRace === game) return;
+  if (!session) paused = true; // solo: nothing left to watch, stop simulating behind the receipt
+  resultsScreen(game.computeResults());
+}
+
+function resultsTable(rows: ResultRow[], meSlot: number, live: boolean) {
+  $('r-table').innerHTML = '<tr><th>#</th><th>Shopper</th><th>Time</th><th>Items</th></tr>' + rows.map((r) => `<tr class="${r.slot === meSlot ? 'me' : ''}"><td>${r.done || !live ? r.place : '…'}</td><td><span style="color:${hex(r.color)}">●</span> ${r.name}${r.bot ? ' 🤖' : ''}</td><td>${r.done ? r.time.toFixed(2) + 's' : live ? 'still shopping' : 'DNF'}</td><td>${r.items}</td></tr>`).join('');
+}
+
 function resultsScreen(rows: ResultRow[]) {
   if (!game) return;
+  const live = game.phase !== 'over';
+  if (paidRace === game) {
+    // already paid (left early): the race finished for real, just fill in everyone else
+    if ($('results').classList.contains('show')) { resultsTable(rows, game.localSlot, live); $<HTMLButtonElement>('btn-again').disabled = false; }
+    return;
+  }
+  paidRace = game;
   const me = rows.find((r) => r.slot === game!.localSlot)!;
   const g = game, lp = g.local, ch = lp.chaos, store = STORE_BY_ID[g.cfg.storeId];
   const bonus = fun.chaosBonus(ch);
@@ -413,13 +434,16 @@ function resultsScreen(rows: ResultRow[]) {
   renderDaily($('r-daily'), fresh.map((c) => c.id));
   if (fresh.length) sfx.finish();
   $('r-title').textContent = me.place === 1 ? '🏆 Shopper of the Year!' : `You placed ${me.place}${['st', 'nd', 'rd'][me.place - 1] ?? 'th'}`;
-  $('r-table').innerHTML = '<tr><th>#</th><th>Shopper</th><th>Time</th><th>Items</th></tr>' + rows.map((r) => `<tr class="${r.slot === me.slot ? 'me' : ''}"><td>${r.place}</td><td><span style="color:${hex(r.color)}">●</span> ${r.name}${r.bot ? ' 🤖' : ''}</td><td>${r.done ? r.time.toFixed(2) + 's' : 'DNF'}</td><td>${r.items}</td></tr>`).join('');
+  resultsTable(rows, me.slot, live);
   const best = profile.best[game.cfg.storeId];
   $('r-reward').innerHTML = `+${earned} coupons (🎟 ${profile.coupons})` + (best ? ` · best here: ${best.toFixed(2)}s` : '') + (promoted ? `<br><b style="color:var(--yellow)">⭐ PROMOTED to ${after.name}! +${fun.rankReward(after.rank)} bonus coupons</b>` : ` · ${after.name} ${after.into}/${after.need} XP`);
-  $('btn-again').textContent = session ? 'Back to Lobby' : 'Race Again';
+  $('btn-again').textContent = session ? (live ? 'Waiting for the others…' : 'Back to Lobby') : 'Race Again';
+  // online, the race keeps going for everyone else: the lobby opens once it's over
+  $<HTMLButtonElement>('btn-again').disabled = !!session && live;
 }
+$('h-leave').onclick = () => leaveEarly();
 $('btn-again').onclick = () => {
-  if (session) { endGame(); lobbyScreen(); }
+  if (session) { if (game && game.phase !== 'over') return; endGame(); lobbyScreen(); }
   else if (lastSolo) void startSolo(lastSolo);
 };
 $('btn-menu').onclick = () => { endGame(); session?.close(); session = null; titleScreen(); };
@@ -553,7 +577,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') game.setCamMode(game.camMode === 'fp' ? 'chase' : 'fp');
   if (e.code === 'KeyR') game.resetLocal();
   if (e.code === 'KeyM' || e.code === 'Tab') { e.preventDefault(); hud.toggleMap(); }
-  if (e.code === 'Escape' && game.phase !== 'over') {
+  if ((e.code === 'Enter' || e.code === 'NumpadEnter') && game.local.done && !paused) { leaveEarly(); return; }
+  if (e.code === 'Escape' && game.phase !== 'over' && paidRace !== game) {
     if (session) return; // can't pause a networked race
     paused = !paused; show(paused ? 'pause' : null); hud.show(!paused);
   }
@@ -725,6 +750,7 @@ const api = {
   equip: (c: Partial<Customization>) => { Object.assign(profile.custom, c); saveProfile(profile); refreshGarageCart(); },
   garage: (cat: Category) => garageScreen(cat),
   garageCart: () => garageCart,
+  leaveEarly: () => leaveEarly(),
   garagePreview: () => preview ? { ...preview, long: garageLong } : null,
   tuneRestock: Restock,
   reloadProfile: () => { profile = loadProfile(); return profile; },

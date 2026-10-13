@@ -776,6 +776,27 @@ await T('results: an itemised damage receipt, awards, daily challenges and a sho
   assert(ranks[0] === 0 && ranks[1] === 0 && ranks[2] === 1 && ranks[3] === ranks[4], 'ranks: ' + ranks);
 });
 
+await T('finish early: leave right away with your receipt + coupons (paid once, place is final)', async () => {
+  await solo('costplenty', 21, 7);
+  const c0 = await E(() => CART.profile.coupons);
+  await E(() => { CART.dev('finish'); CART.advance(0.5); CART.render(); });
+  const s0 = await E(() => ({ phase: CART.game.phase, btn: !document.getElementById('h-leave').classList.contains('hidden'), left: CART.game.cfg.time - CART.game.raceTime }));
+  assert(s0.phase === 'race' && s0.left > 60, 'race should still be running: ' + JSON.stringify(s0));
+  assert(s0.btn, 'no leave-early button after checking out');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.getElementById('results').classList.contains('show'), { timeout: 5000, polling: 100 });
+  const r = await E(() => ({ coupons: CART.profile.coupons, table: document.getElementById('r-table').textContent, title: document.getElementById('r-title').textContent, receipt: document.getElementById('r-receipt').textContent }));
+  assert(r.coupons > c0, 'no coupons for leaving early');
+  assert(r.title.includes('Shopper of the Year'), 'first to check out should win: ' + r.title);
+  assert(r.table.includes('still shopping') && !r.table.includes('DNF'), 'others should be still shopping: ' + r.table);
+  assert(r.receipt.length > 20, 'no receipt');
+  await page.screenshot({ path: 'tests/screenshots/17-leave-early.png' });
+  // the race ending later never pays twice
+  await E(() => { CART.game.phase = 'race'; CART.game.endRace(); });
+  await new Promise((res) => setTimeout(res, 1500));
+  assert((await E(() => CART.profile.coupons)) === r.coupons, 'paid twice');
+});
+
 await T('horns: a honk startles the bot in front (it jumps and yells); bumping a bot makes it complain', async () => {
   await solo('safely', 99, 1);
   const r = await E(() => {

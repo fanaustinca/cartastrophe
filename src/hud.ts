@@ -84,6 +84,7 @@ export class Hud {
     }
     if (lp.done) html += `<div class="go">✅ CHECKED OUT ${lp.finishTime.toFixed(2)}s</div>`;
     else if (g.complete(lp)) html += '<div class="go">➡ GO TO ANY CHECKOUT!</div>';
+    $('h-leave').classList.toggle('hidden', !(lp.done && g.phase === 'race'));
     if (html !== this.lastListKey) { this.lastListKey = html; $('h-list').innerHTML = html; }
 
     // standings

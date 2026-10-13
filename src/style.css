@@ -91,6 +91,9 @@ label { display: flex; flex-direction: column; gap: 6px; width: min(360px, 100%)
 #h-list div.it .q { margin-left: 8px; }
 #h-list div.it.got { opacity: 0.45; }
 #h-list div.it.got b { text-decoration: line-through; }
+#h-leave { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); pointer-events: auto; font-size: 1.15rem; padding: 12px 22px; background: var(--yellow); color: #222; border: 0; border-radius: 12px; cursor: pointer; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); animation: nudge 0.7s infinite alternate; }
+@keyframes nudge { to { transform: translateX(-50%) scale(1.06); } }
+#h-leave kbd { font: inherit; font-size: 0.8em; background: rgba(0, 0, 0, 0.15); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
 #h-list div.go { color: var(--yellow); margin-top: 6px; animation: pulse 0.8s infinite alternate; }
 @keyframes pulse { to { opacity: 0.4; } }
 #h-standings { position: absolute; top: 12px; left: 12px; background: var(--panel); border-radius: 12px; padding: 8px 12px; font-size: 0.85rem; min-width: 190px; }
